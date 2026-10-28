@@ -66,6 +66,7 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   <div class="grid" id="stats"></div>
   <div class="card insight" id="insight"></div>
   <div id="stabWrap" hidden><h2>Stability</h2><div class="grid" id="stab"></div></div>
+  <div id="recWrap" hidden><h2>Test record at this remote</h2><div class="card" id="rec"></div></div>
   <div id="testWrap" hidden><h2>LIM self-tests and remote</h2><div class="grid" id="tests"></div></div>
   <h2 id="c24h">Last 24 hours (hourly max)</h2>
   <div class="card" id="c24"></div>
@@ -88,7 +89,7 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
 // report screen: kind 1 THC trend (SILENCE), kind 2 LIM health (TEST). Everything stays on this device:
 // the data is in the link's # part, which browsers never send to a server.
 // SAMPLES is rewritten by make_log_qr.py; ?sample=lim picks the other one.
-const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAEUHDI1vgQ13yAFBdEEM3IKNFEbM-4gM48mLxwcHBwXFxcYFxcYFxgSEhISHBwzNS4cHDU1HBg1NTUmJhwYJiYmJiYcGCYmJiYmHBgmJiYmJhHBd4d3dxgRwfH4EQESCDEAAKgAAwDYA3s", "scan": "2026-10-28T10:15:00", "label": "Room equipment: THC trend"}, "room-health": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAIUHDKoAAMAAAAAAAAAAAAAAAAAAAAAAADjA-MDEgAYAACRkZGRkZGRkZGSkpGRkpGRkZGRkpGSkZGRkZKSkpFDAwDYAzA", "scan": "2026-10-28T10:15:00", "label": "Room equipment: LIM health"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAEUGjIu0gQ4HQwDAx0MAsUYAvkgAigaGioWFhYWJxYWFioWFhYWKhoaLhoaGi4qOCw4OC8qLi4WGhoaGhoaFhoaGhoaGhYaGhoaGh_xERF_ER8R8REfEQEBAQEHQKg9AADoBbY", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): THC trend"}, "lim-health": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAIUGjKoPQMTDNYACgkmC7oNPhEuEtITZha-GDYZJhqeGgAhQUQzVwAAAAAAAAAAAADjA60DHABYACRpaWpdXFtbXF5hh4mHh4iHiIeHh4eIh4eHh4eHiodDAADoBUM", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): LIM health"}, "pg-health": {"link": "https://jclawrence-1.github.io/lim-log/p/C4P7R#4.BAI0HDKoAABDAwDYA1E", "scan": "2026-10-28T10:15:00", "label": "PG Mark IV (start-only): LIM health"}};
+const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAEUHDI1vgQ13yAFBdEEM3IKNFEbM-4gM48mLxwcHBwXFxcYFxcYFxgSEhISHBwzNS4cHDU1HBg1NTUmJhwYJiYmJiYcGCYmJiYmHBgmJiYmJhHBd4d3dxgRwfH4EQESCDEAAKgAAwDYA3s", "scan": "2026-10-28T10:15:00", "label": "Room equipment: THC trend"}, "room-health": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAIUHDKoAAcAAAAAAAAAAAAAAAAAAAAAAADjA-MDEgAYAACRkZGRkZGRkZGSkpGRkpGRkZGRkpGSkZGRkZKSkpFDBHwBAgCiAQMArgEBNlgCBAADANgDoQ", "scan": "2026-10-28T10:15:00", "label": "Room equipment: LIM health"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAEUGjIu0gQ4HQwDAx0MAsUYAvkgAigaGioWFhYWJxYWFioWFhYWKhoaLhoaGi4qOCw4OC8qLi4WGhoaGhoaFhoaGhoaGhYaGhoaGh_xERF_ER8R8REfEQEBAQEHQKg9AADoBbY", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): THC trend"}, "lim-health": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAIUGjKoPQMTDNYACgkmC7oNPhEuEtITZha-GDYZJhqeGgAhQUQzVwAAAAAAAAAAAADjA60DHABYACRpaWpdXFtbXF5hh4mHh4iHiIeHh4eIh4eHh4eHiodDAADoBUM", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): LIM health"}, "pg-health": {"link": "https://jclawrence-1.github.io/lim-log/p/C4P7R#4.BAI0HDKoAABDAwDYA1E", "scan": "2026-10-28T10:15:00", "label": "PG Mark IV (start-only): LIM health"}};
 const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -129,6 +130,8 @@ function decode(link) {
       d.dailyRatio = Array.from({ length: 30 }, () => { const x = u8(); return x === 255 ? null : 0.85 + x / 1000; });
     }
     readHealth();
+    d.recent = [];
+    if (detail & 4) { const n = u8(); for (let i = 0; i < n; i++) { const sec = u16(), type = u8(), val = u8(); d.recent.push({ sec, type, val }); } }
     d.commsErr = u16(); d.uptimeH = u16();
     return flags();
   }
@@ -172,6 +175,12 @@ function decode(link) {
 // Self-test grading limits, Series D cal block (same rules as the bench tool cal_parse.py)
 const RATIO_MIN = 0.97, OFFSET_MAX = 60;
 const SD_ERR = { 90: 'line ratio high', 91: 'line ratio low', 92: 'low line', 95: 'L1L3 ratio high', 96: 'L1L3 ratio low', 97: 'frequency out of tolerance' };
+
+// Test record events (the remote's last few hours, seconds ago)
+const EV = { 1: e => `LIM alarm received (${(e.val / 10).toFixed(1)} mA): HAZARD LED + buzzer on`, 2: () => 'LIM alarm cleared', 3: () => 'Silenced at this remote',
+  4: () => 'TEST pressed here: remote self-test, test sent to the LIM', 5: () => 'TEST pressed here: remote self-test (LIM not asked)',
+  6: () => 'LIM self-test started', 7: () => 'LIM self-test passed', 8: () => 'LIM self-test FAILED', 9: () => 'No data from the LIM: remote alarmed', 10: () => 'LIM data back' };
+const hms = t => t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
 
 const at = (scan, ago) => new Date(scan.getTime() - ago * 60000);
 const hm = t => t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -305,6 +314,20 @@ function render(d, scan, sampleKey) {
   const dayLab = n => Array.from({ length: n }, (_, i) => {
     const t = at(scan, (n - 1 - i) * 1440); return { full: day(t), tick: i % 5 === 4 ? t.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : '' };
   });
+  const rec = d.recent || [];
+  $('recWrap').hidden = !rec.length;
+  if (rec.length) {
+    const t = e => new Date(scan.getTime() - e.sec * 1000);
+    const al = rec.filter(e => e.type === 1).pop();                // oldest alarm in the record
+    let sum = '';
+    if (al) {
+      const sil = rec.find(e => e.type === 3 && e.sec < al.sec), clr = rec.find(e => e.type === 2 && e.sec < al.sec);
+      sum = `<p><b>This remote received the LIM alarm at ${hms(t(al))}</b> and sounded its buzzer`
+        + (sil ? `, silenced here after ${al.sec - sil.sec} s` : ', not silenced here')
+        + (clr ? `; the alarm cleared after ${al.sec - clr.sec} s` : '') + '.</p>';
+    } else sum = '<p>No LIM alarm reached this remote in the last 4 hours.</p>';
+    $('rec').innerHTML = sum + `<table><tr><th>Time</th><th>Event</th></tr>${rec.map(e => `<tr><td>${hms(t(e))}</td><td>${esc((EV[e.type] || (() => 'event ' + e.type))(e))}</td></tr>`).join('')}</table>`;
+  }
   if (!d.hasTrend) {
     const hasRatio = !!d.dailyRatio && d.dailyRatio.some(r => r !== null);
     $('c24h').hidden = $('c24').hidden = !hasRatio;
