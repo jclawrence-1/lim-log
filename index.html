@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LIM Remote Log</title>
+<style>
+:root {
+  --bg: #F4F5F3; --card: #FFFFFF; --ink: #1F2328; --muted: #5F6670; --line: #E1E4E0;
+  --brand: #2D5434; --brand-ink: #FFFFFF; --amber: #D18740; --red: #C1272D; --ok: #2E9E44;
+  --bar: #8FA996; --bar-hi: #D18740; --bar-alarm: #C1272D;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121514; --card: #1B1F1D; --ink: #E8EAE8; --muted: #9AA39D; --line: #2C322F;
+    --brand: #2D5434; --brand-ink: #FFFFFF; --bar: #5E7A66; --bar-hi: #E09A55; --bar-alarm: #E0484E;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121514; --card: #1B1F1D; --ink: #E8EAE8; --muted: #9AA39D; --line: #2C322F;
+  --brand: #2D5434; --brand-ink: #FFFFFF; --bar: #5E7A66; --bar-hi: #E09A55; --bar-alarm: #E0484E;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, -apple-system, "Segoe UI", Arial, sans-serif; }
+header { background: var(--brand); color: var(--brand-ink); padding: 14px 16px 12px; }
+header .k { font-size: 12px; opacity: .8; letter-spacing: .04em; text-transform: uppercase; }
+header h1 { margin: 2px 0 0; font-size: 20px; }
+main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
+.banner { background: #FFF4E5; color: #6B4A12; border: 1px solid #F0D2A4; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 12px; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .banner { background: #3A2E1A; color: #F0D9B0; border-color: #5A4524; } }
+.err { background: #FDECEC; color: #7A1A1E; border-color: #F2B8BB; }
+.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+@media (min-width: 560px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.stat .v { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.stat .v small { font-size: 14px; font-weight: 500; color: var(--muted); }
+.stat .l { font-size: 12px; color: var(--muted); }
+.stat .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.state { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; color: #fff; }
+.insight { margin: 12px 0; border-left: 4px solid var(--amber); }
+.insight b { display: block; font-size: 16px; margin-bottom: 2px; }
+h2 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+svg { width: 100%; height: auto; display: block; }
+svg text { fill: var(--muted); font-size: 10px; font-family: inherit; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: left; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.foot { font-size: 12px; color: var(--muted); margin-top: 16px; }
+details { margin-top: 16px; }
+textarea { width: 100%; min-height: 70px; font: 12px monospace; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
+button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; cursor: pointer; }
+</style>
+</head>
+<body>
+<header><div class="k">LIM remote log</div><h1 id="title">Panel</h1></header>
+<main>
+  <div id="banner"></div>
+  <div class="grid" id="stats"></div>
+  <div class="card insight" id="insight"></div>
+  <h2>Last 24 hours (hourly max)</h2>
+  <div class="card" id="c24"></div>
+  <h2>Last 30 days (daily max)</h2>
+  <div class="card" id="c30"></div>
+  <h2>Alarms, last 7 days</h2>
+  <div class="card" id="events"></div>
+  <div class="foot" id="foot"></div>
+  <details><summary>Decode another link</summary>
+    <textarea id="paste" placeholder="Paste the scanned link here"></textarea>
+    <button id="go">Show</button>
+  </details>
+</main>
+<script>
+// Decoder for the remote log QR, format v1 (log-qr-format.md). Everything stays on this device:
+// the data is in the link's # part, which browsers never send to a server.
+// SAMPLE is rewritten by make_log_qr.py.
+const SAMPLE = 'https://jclawrence-1.github.io/lim-log/p/A7K3Q#1.ARQcMjW-BDXfIAUF0QQzcgo0URsz7iAzjyYvHBwcHBESEhISEhISEhISEhIcHDM1LhwcNTUcEjU1NSYmHBImJiYmJhwSJiYmJiYcEiYmJiYmAwDYA5g';
+const SAMPLE_SCAN = '2026-10-28T10:15:00';
+const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function decode(link) {
+  const m = /\/p\/([^#?\/]+)[^#]*#1\.([A-Za-z0-9_-]+)/.exec(link);
+  if (!m) throw new Error('Not a remote log link.');
+  const b64 = m[2].replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64 + '==='.slice((b64.length + 3) % 4));
+  const b = Uint8Array.from(raw, c => c.charCodeAt(0));
+  let sum = 0; for (let i = 0; i < b.length - 1; i++) sum = (sum + b[i]) & 255;
+  if (b[0] !== 1) throw new Error('Unsupported format version ' + b[0] + '.');
+  if (sum !== b[b.length - 1]) throw new Error('Checksum failed: the scan was damaged. Scan again.');
+  let o = 0;
+  const u8 = () => b[o++], u16 = () => { const v = b[o] | (b[o + 1] << 8); o += 2; return v; };
+  const ma = v => v === 255 ? null : v / 10;
+  const d = { panel: decodeURIComponent(m[1]) };
+  u8();
+  const f = u8();
+  d.alarm = !!(f & 1); d.silenced = !!(f & 2); d.comms = !!(f & 4); d.powerup = !!(f & 8); d.lim = LIM_TYPES[f >> 4] || LIM_TYPES[0];
+  d.now = ma(u8()); d.trip = u8() || null; if (d.trip) d.trip /= 10;
+  d.max24 = { ma: ma(u8()), ago: u16() };
+  d.max7 = { ma: ma(u8()), ago: u16() };
+  d.alarms7 = u8();
+  const n = u8(); d.events = [];
+  for (let i = 0; i < n; i++) { const ago = u16(), dur = u8(); d.events.push({ ago, dur }); }
+  d.hourly = Array.from({ length: 24 }, () => ma(u8()));
+  d.daily = Array.from({ length: 30 }, () => ma(u8()));
+  d.commsErr = u16(); d.uptimeH = u16();
+  return d;
+}
+
+const at = (scan, ago) => new Date(scan.getTime() - ago * 60000);
+const hm = t => t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const day = t => t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+const hr12 = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function bars(vals, labels, trip, opts) {
+  // vals: oldest first. Bars go amber at >= 80% of trip, red at >= trip.
+  const W = 640, H = 170, L = 30, R = 16, B = 22, T = 8, n = vals.length;
+  const top = Math.max(trip || 0, ...vals.filter(v => v !== null)) * 1.15 || 1;
+  const y = v => T + (H - T - B) * (1 - v / top), bw = (W - L - R) / n;
+  let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(opts.aria)}">`;
+  for (let g = 0; g <= top; g += top > 8 ? 2 : 1) s += `<line x1="${L}" x2="${W - R}" y1="${y(g)}" y2="${y(g)}" stroke="${css('--line')}"/><text x="${L - 4}" y="${y(g) + 3}" text-anchor="end">${g}</text>`;
+  vals.forEach((v, i) => {
+    if (v === null) return;
+    const c = trip && v >= trip ? css('--bar-alarm') : trip && v >= 0.8 * trip ? css('--bar-hi') : css('--bar');
+    s += `<rect x="${L + i * bw + 1}" y="${y(v)}" width="${Math.max(1, bw - 2)}" height="${H - B - y(v)}" rx="1.5" fill="${c}"><title>${esc(labels[i].full)}: ${v.toFixed(1)} mA</title></rect>`;
+    if (labels[i].tick) s += `<text x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(labels[i].tick)}</text>`;
+  });
+  if (trip) s += `<line x1="${L}" x2="${W - R}" y1="${y(trip)}" y2="${y(trip)}" stroke="${css('--red')}" stroke-dasharray="4 3"/><text x="${L + 4}" y="${y(trip) - 4}" text-anchor="start" style="fill:${css('--red')};paint-order:stroke;stroke:${css('--card')};stroke-width:4px;font-weight:600">LIM trip ${trip.toFixed(1)} mA</text>`;
+  return s + '</svg>';
+}
+
+function render(d, scan, isSample) {
+  $('title').textContent = 'Panel ' + d.panel;
+  $('banner').innerHTML = isSample ? `<div class="banner">Sample data (made-up Series D panel). Times are as if scanned ${day(scan)} at ${hm(scan)}.</div>` : '';
+  const st = d.alarm ? ['ALARM', css('--red')] : d.now !== null && d.trip && d.now >= 0.8 * d.trip ? ['RISING', css('--amber')] : ['NORMAL', css('--ok')];
+  const m24 = at(scan, d.max24.ago), m7 = at(scan, d.max7.ago);
+  $('stats').innerHTML = [
+    ['THC now', d.now, `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
+    ['24 h max', d.max24.ma, `${day(m24)} ${hm(m24)}`],
+    ['7 day max', d.max7.ma, `${day(m7)} ${hm(m7)}`],
+    ['Alarms, 7 days', null, d.trip ? `trip ${d.trip.toFixed(1)} mA` : '', d.alarms7],
+  ].map(([l, v, s, count]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${count !== undefined ? count : v === null ? '–' : v.toFixed(1) + ' <small>mA</small>'}</div><div class="s">${s}</div></div>`).join('');
+
+  // Pattern: what hours of the day the alarms started in.
+  const ev = d.events.map(e => ({ t: at(scan, e.ago), dur: e.dur }));
+  let ins = '';
+  if (ev.length) {
+    const hrs = ev.map(e => e.t.getHours() + e.t.getMinutes() / 60);
+    const lo = Math.floor(Math.min(...hrs)), hi = Math.ceil(Math.max(...hrs));
+    const days = new Set(ev.map(e => e.t.getDay()));
+    const wk = [...days].every(x => x >= 1 && x <= 5);
+    ins = `<b>${d.alarms7} alarm${d.alarms7 > 1 ? 's' : ''} in 7 days${hi - lo <= 4 ? `, all between ${hr12(lo)} and ${hr12(hi % 24)}` : ''}${wk ? ', weekdays only' : ''}.</b>`
+      + `Highest ${d.max7.ma.toFixed(1)} mA on ${day(m7)} at ${hm(m7)}. `
+      + (hi - lo <= 4 ? 'A repeating time points to equipment used on a schedule (a case, a cart, a light), not a LIM fault. Check what is plugged in at that time of day.' : 'No single time of day stands out.');
+  } else {
+    ins = `<b>No alarms in 7 days.</b>Highest ${d.max7.ma === null ? '–' : d.max7.ma.toFixed(1) + ' mA'} on ${day(m7)} at ${hm(m7)}.`;
+  }
+  $('insight').innerHTML = ins;
+
+  const h24 = d.hourly.slice().reverse(), lab24 = h24.map((_, i) => {
+    const t = at(scan, (23 - i) * 60); return { full: `${day(t)} ${hr12(t.getHours())}`, tick: i % 3 === 0 ? hr12(t.getHours()) : '' };
+  });
+  $('c24').innerHTML = bars(h24, lab24, d.trip, { aria: 'Hourly maximum THC, last 24 hours' });
+  const d30 = d.daily.slice().reverse(), lab30 = d30.map((_, i) => {
+    const t = at(scan, (29 - i) * 1440); return { full: day(t), tick: i % 5 === 4 ? t.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : '' };
+  });
+  $('c30').innerHTML = bars(d30, lab30, d.trip, { aria: 'Daily maximum THC, last 30 days' });
+
+  $('events').innerHTML = ev.length
+    ? `<table><tr><th>Started</th><th>Lasted</th></tr>${ev.map(e => `<tr><td>${day(e.t)} ${hm(e.t)}</td><td>${e.dur >= 255 ? '4 h+' : e.dur + ' min'}</td></tr>`).join('')}</table>`
+      + (d.alarms7 > ev.length ? `<p class="foot">Showing the newest ${ev.length} of ${d.alarms7}.</p>` : '')
+    : '<p>None.</p>';
+  $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
+    + (d.powerup ? ' · <b>power cut inside the window: older data missing</b>' : '')
+    + '<br>Times use this phone\'s clock at the moment of the scan. The readings never leave this device.';
+}
+
+function show(link, scan, isSample) {
+  try { render(decode(link), scan, isSample); }
+  catch (e) { $('banner').innerHTML = `<div class="banner err">${esc(e.message)}</div>`; }
+}
+$('go').onclick = () => show($('paste').value.trim(), new Date(), false);
+if (location.hash.startsWith('#1.')) show(location.href, new Date(), false);
+else show(SAMPLE, new Date(SAMPLE_SCAN), true);
+</script>
+</body>
+</html>
