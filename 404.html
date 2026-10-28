@@ -38,7 +38,10 @@ main { max-width: 720px; margin: 0 auto; padding: 12px 16px 32px; }
 .stat .s { font-size: 12px; color: var(--muted); margin-top: 2px; }
 .state { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 600; color: #fff; }
 .insight { margin: 12px 0; border-left: 4px solid var(--amber); }
-.insight b { display: block; font-size: 16px; margin-bottom: 2px; }
+.insight ul { margin: 6px 0 0; padding-left: 18px; }
+.insight li { margin: 6px 0; }
+.verdict { font-size: 17px; font-weight: 700; }
+.banner a { color: inherit; }
 h2 { font-size: 14px; margin: 18px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
 svg { width: 100%; height: auto; display: block; }
 svg text { fill: var(--muted); font-size: 10px; font-family: inherit; }
@@ -62,7 +65,8 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   <div id="banner"></div>
   <div class="grid" id="stats"></div>
   <div class="card insight" id="insight"></div>
-  <h2>Last 24 hours (hourly max)</h2>
+  <div id="stabWrap" hidden><h2>Stability</h2><div class="grid" id="stab"></div></div>
+  <h2 id="c24h">Last 24 hours (hourly max)</h2>
   <div class="card" id="c24"></div>
   <h2>Last 30 days (daily max)</h2>
   <div class="card" id="c30"></div>
@@ -79,29 +83,29 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   </details>
 </main>
 <script>
-// Decoder for the remote log QR, format v1 (log-qr-format.md). Everything stays on this device:
+// Decoder for the remote log QR, formats v1 and v2 (log-qr-format.md). Everything stays on this device:
 // the data is in the link's # part, which browsers never send to a server.
-// SAMPLE is rewritten by make_log_qr.py.
-const SAMPLE = 'https://jclawrence-1.github.io/lim-log/p/A7K3Q#1.ARQcMjW-BDXfIAUF0QQzcgo0URsz7iAzjyYvHBwcHBESEhISEhISEhISEhIcHDM1LhwcNTUcEjU1NSYmHBImJiYmJhwSJiYmJiYcEiYmJiYmAwDYA5g';
-const SAMPLE_SCAN = '2026-10-28T10:15:00';
+// SAMPLES is rewritten by make_log_qr.py; ?sample=lim picks the other one.
+const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#2.AhQcMjW-BDXfIAUF0QQzcgo0URsz7iAzjyYvHBwcHBcXFxgXFxgXGBISEhIcHDM1LhwcNTUcGDU1NSYmHBgmJiYmJhwYJiYmJiYcGCYmJiYmEcF3h3d3GBHB8fgRARIIMQAAqAADANgDeA", "scan": "2026-10-28T10:15:00", "label": "Room equipment"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#2.AhQaMi7SBDgdDAMDHQwCxRgC-SACKBoaKhYWFhYnFhYWKhYWFhYqGhouGhoaLio4LDg4LyouLhYaGhoaGhoWGhoaGhoaFhoaGhoaH_EREX8RHxHxER8RAQEBAQdAqD0AAOgFsw", "scan": "2026-10-28T10:15:00", "label": "LIM fault"}};
 const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const LINK_RE = /\/p\/([^#?\/]+)[^#]*#([12])\.([A-Za-z0-9_-]+)(?:\.(\d+))?/;
 
 function decode(link) {
-  const m = /\/p\/([^#?\/]+)[^#]*#1\.([A-Za-z0-9_-]+)(?:\.(\d+))?/.exec(link);
+  const m = LINK_RE.exec(link);
   if (!m) throw new Error('Not a remote log link.');
-  const b64 = m[2].replace(/-/g, '+').replace(/_/g, '/');
+  const b64 = m[3].replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(b64 + '==='.slice((b64.length + 3) % 4));
   const b = Uint8Array.from(raw, c => c.charCodeAt(0));
   let sum = 0; for (let i = 0; i < b.length - 1; i++) sum = (sum + b[i]) & 255;
-  if (b[0] !== 1) throw new Error('Unsupported format version ' + b[0] + '.');
+  if (b[0] !== 1 && b[0] !== 2) throw new Error('Unsupported format version ' + b[0] + '.');
   if (sum !== b[b.length - 1]) throw new Error('Checksum failed: the scan was damaged. Scan again.');
   let o = 0;
   const u8 = () => b[o++], u16 = () => { const v = b[o] | (b[o + 1] << 8); o += 2; return v; };
   const ma = v => v === 255 ? null : v / 10;
-  const d = { panel: decodeURIComponent(m[1]), scanned: m[3] ? new Date(Number(m[3]) * 1000) : null };
-  u8();
+  const d = { panel: decodeURIComponent(m[1]), scanned: m[4] ? new Date(Number(m[4]) * 1000) : null };
+  d.v = u8();
   const f = u8();
   d.alarm = !!(f & 1); d.silenced = !!(f & 2); d.comms = !!(f & 4); d.powerup = !!(f & 8); d.lim = LIM_TYPES[f >> 4] || LIM_TYPES[0];
   d.now = ma(u8()); d.trip = u8() || null; if (d.trip) d.trip /= 10;
@@ -112,6 +116,12 @@ function decode(link) {
   for (let i = 0; i < n; i++) { const ago = u16(), dur = u8(); d.events.push({ ago, dur }); }
   d.hourly = Array.from({ length: 24 }, () => ma(u8()));
   d.daily = Array.from({ length: 30 }, () => ma(u8()));
+  if (d.v >= 2) {
+    d.spread = [];
+    for (let i = 0; i < 12; i++) { const x = u8(); d.spread.push((x & 15) / 10, (x >> 4) / 10); }
+    d.quiet = { ma: ma(u8()), hAgo: u8() };
+    d.steps24 = u8(); d.steps7 = u8(); d.spikes24 = u8(); d.spikes7 = u8(); d.selftests7 = u8(); d.stJumps7 = u8();
+  }
   d.commsErr = u16(); d.uptimeH = u16();
   return d;
 }
@@ -121,9 +131,10 @@ const hm = t => t.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 const day = t => t.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 const hr12 = h => (h % 12 || 12) + (h < 12 ? ' am' : ' pm');
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
 function bars(vals, labels, trip, opts) {
-  // vals: oldest first. Bars go amber at >= 80% of trip, red at >= trip.
+  // vals: oldest first. Bars go amber at >= 80% of trip, red at >= trip. opts.mins: each bar's low mark.
   const W = 640, H = 170, L = 30, R = 16, B = 22, T = 8, n = vals.length;
   const top = Math.max(trip || 0, ...vals.filter(v => v !== null)) * 1.15 || 1;
   const y = v => T + (H - T - B) * (1 - v / top), bw = (W - L - R) / n;
@@ -132,45 +143,77 @@ function bars(vals, labels, trip, opts) {
   vals.forEach((v, i) => {
     if (v === null) return;
     const c = trip && v >= trip ? css('--bar-alarm') : trip && v >= 0.8 * trip ? css('--bar-hi') : css('--bar');
-    s += `<rect x="${L + i * bw + 1}" y="${y(v)}" width="${Math.max(1, bw - 2)}" height="${H - B - y(v)}" rx="1.5" fill="${c}"><title>${esc(labels[i].full)}: ${v.toFixed(1)} mA</title></rect>`;
+    const lo = opts.mins ? opts.mins[i] : null;
+    s += `<rect x="${L + i * bw + 1}" y="${y(v)}" width="${Math.max(1, bw - 2)}" height="${H - B - y(v)}" rx="1.5" fill="${c}"><title>${esc(labels[i].full)}: ${lo !== null ? `${lo.toFixed(1)} to ` : ''}${v.toFixed(1)} mA</title></rect>`;
+    if (lo !== null && v - lo >= 0.2) s += `<line x1="${L + i * bw + 2}" x2="${L + (i + 1) * bw - 2}" y1="${y(lo)}" y2="${y(lo)}" stroke="${css('--ink')}" stroke-width="2" opacity=".55"/>`;
     if (labels[i].tick) s += `<text x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(labels[i].tick)}</text>`;
   });
   if (trip) s += `<line x1="${L}" x2="${W - R}" y1="${y(trip)}" y2="${y(trip)}" stroke="${css('--red')}" stroke-dasharray="4 3"/><text x="${L + 4}" y="${y(trip) - 4}" text-anchor="start" style="fill:${css('--red')};paint-order:stroke;stroke:${css('--card')};stroke-width:4px;font-weight:600">LIM trip ${trip.toFixed(1)} mA</text>`;
   return s + '</svg>';
 }
 
-function render(d, scan, isSample) {
-  $('title').textContent = 'Panel ' + d.panel;
-  $('banner').innerHTML = isSample ? `<div class="banner">Sample data (made-up Series D panel). Times are as if scanned ${day(scan)} at ${hm(scan)}.</div>` : '';
-  const st = d.alarm ? ['ALARM', css('--red')] : d.now !== null && d.trip && d.now >= 0.8 * d.trip ? ['RISING', css('--amber')] : ['NORMAL', css('--ok')];
-  const m24 = at(scan, d.max24.ago), m7 = at(scan, d.max7.ago);
-  $('stats').innerHTML = [
-    ['THC now', d.now, `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
-    ['24 h max', d.max24.ma, `${day(m24)} ${hm(m24)}`],
-    ['7 day max', d.max7.ma, `${day(m7)} ${hm(m7)}`],
-    ['Alarms, 7 days', null, d.trip ? `trip ${d.trip.toFixed(1)} mA` : '', d.alarms7],
-  ].map(([l, v, s, count]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${count !== undefined ? count : v === null ? '–' : v.toFixed(1) + ' <small>mA</small>'}</div><div class="s">${s}</div></div>`).join('');
-
-  // Pattern: what hours of the day the alarms started in.
-  const ev = d.events.map(e => ({ t: at(scan, e.ago), dur: e.dur }));
-  let ins = '';
+// What the log points to. Wording says "looks like" / "suspect", never "proves".
+function findings(d, scan, ev) {
+  const out = [];
+  let lim = false, room = false;
+  if (d.v >= 2) {
+    const frac = d.selftests7 ? d.stJumps7 / d.selftests7 : 0;
+    if (d.stJumps7 >= 3 && frac >= 0.15) { lim = true; out.push(`<b>Jumps at ${d.stJumps7} of ${d.selftests7} LIM self-tests this week.</b> The reading moves when the LIM tests itself, not when the room changes: suspect the LIM.`); }
+    if (d.spikes7 >= 10) { lim = true; out.push(`<b>${plural(d.spikes7, 'one-reading spike')} this week</b> (${d.spikes24} in 24 h): the reading jumps and comes straight back. Suspect the LIM or its connections.`); }
+  }
   if (ev.length) {
     const hrs = ev.map(e => e.t.getHours() + e.t.getMinutes() / 60);
     const lo = Math.floor(Math.min(...hrs)), hi = Math.ceil(Math.max(...hrs));
-    const days = new Set(ev.map(e => e.t.getDay()));
-    const wk = [...days].every(x => x >= 1 && x <= 5);
-    ins = `<b>${d.alarms7} alarm${d.alarms7 > 1 ? 's' : ''} in 7 days${hi - lo <= 4 ? `, all between ${hr12(lo)} and ${hr12(hi % 24)}` : ''}${wk ? ', weekdays only' : ''}.</b>`
-      + `Highest ${d.max7.ma.toFixed(1)} mA on ${day(m7)} at ${hm(m7)}. `
-      + (hi - lo <= 4 ? 'A repeating time points to equipment used on a schedule (a case, a cart, a light), not a LIM fault. Check what is plugged in at that time of day.' : 'No single time of day stands out.');
-  } else {
-    ins = `<b>No alarms in 7 days.</b>Highest ${d.max7.ma === null ? '–' : d.max7.ma.toFixed(1) + ' mA'} on ${day(m7)} at ${hm(m7)}.`;
+    const wk = ev.every(e => e.t.getDay() >= 1 && e.t.getDay() <= 5);
+    const short = ev.every(e => e.dur <= 2);
+    if (hi - lo <= 4 && ev.length >= 2) { room = true; out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days, all between ${hr12(lo)} and ${hr12(hi % 24)}${wk ? ', weekdays only' : ''}.</b> A repeating time points to equipment used on a schedule (a case, a cart, a light). Check what is plugged in then.`); }
+    else if (short) { lim = true; out.push(`<b>${plural(d.alarms7, 'alarm')}, each lasting a minute or two, at scattered times.</b> Short alarms with no pattern are typical of a LIM glitch rather than a load.`); }
+    else out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days,</b> no single time of day stands out.`);
   }
-  $('insight').innerHTML = ins;
+  if (d.v >= 2 && (d.steps24 >= 4 || d.steps7 >= 15) && !lim) {
+    room = true;
+    out.push(`<b>${plural(d.steps24, 'step')} in 24 h (${d.steps7} this week), none at self-tests.</b> The reading rises, holds for a while, then drops: looks like equipment switching on and off (a battery charger, thermostat or battery check). Check what stays plugged in.`);
+  }
+  if (d.v >= 2 && !lim) out.push(`LIM self-tests look clean: ${d.stJumps7} of ${d.selftests7} with a jump.`);
+  const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')] : ['Nothing stands out', css('--ok')];
+  $('insight').style.borderLeftColor = head[1];
+  return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || '<li>No alarms, steps or spikes in 7 days.</li>'}</ul>`;
+}
+
+function render(d, scan, sampleKey) {
+  $('title').textContent = 'Panel ' + d.panel;
+  $('banner').innerHTML = sampleKey ? `<div class="banner">Sample data (made-up Series D panel), times as if scanned ${day(scan)} at ${hm(scan)}. Samples: ${Object.entries(SAMPLES).map(([k, s]) => k === sampleKey ? `<b>${esc(s.label)}</b>` : `<a href="?sample=${k}">${esc(s.label)}</a>`).join(' · ')}</div>` : '';
+  const st = d.alarm ? ['ALARM', css('--red')] : d.now !== null && d.trip && d.now >= 0.8 * d.trip ? ['RISING', css('--amber')] : ['NORMAL', css('--ok')];
+  const m24 = at(scan, d.max24.ago), m7 = at(scan, d.max7.ago);
+  const card = ([l, v, s]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
+  const mA = v => v === null ? '–' : v.toFixed(1) + ' <small>mA</small>';
+  $('stats').innerHTML = [
+    ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
+    ['24 h max', mA(d.max24.ma), `${day(m24)} ${hm(m24)}`],
+    ['7 day max', mA(d.max7.ma), `${day(m7)} ${hm(m7)}`],
+    ['Alarms, 7 days', d.alarms7, d.trip ? `trip ${d.trip.toFixed(1)} mA` : ''],
+  ].map(card).join('');
+
+  const ev = d.events.map(e => ({ t: at(scan, e.ago), dur: e.dur }));
+  $('insight').innerHTML = findings(d, scan, ev);
+
+  if (d.v >= 2) {
+    const qt = at(scan, d.quiet.hAgo * 60);
+    $('stab').innerHTML = [
+      ['Steadiest hour moved', mA(d.quiet.ma), `${hr12(qt.getHours())}, ${day(qt)}`],
+      ['Steps, 24 h / 7 d', `${d.steps24} <small>/ ${d.steps7}</small>`, 'rise and hold: equipment'],
+      ['Spikes, 24 h / 7 d', `${d.spikes24} <small>/ ${d.spikes7}</small>`, 'jump and back'],
+      ['Self-test jumps', `${d.stJumps7} <small>of ${d.selftests7}</small>`, 'last 7 days'],
+    ].map(card).join('');
+    $('stabWrap').hidden = false;
+  } else $('stabWrap').hidden = true;
 
   const h24 = d.hourly.slice().reverse(), lab24 = h24.map((_, i) => {
     const t = at(scan, (23 - i) * 60); return { full: `${day(t)} ${hr12(t.getHours())}`, tick: i % 3 === 0 ? hr12(t.getHours()) : '' };
   });
-  $('c24').innerHTML = bars(h24, lab24, d.trip, { aria: 'Hourly maximum THC, last 24 hours' });
+  const mins = d.spread ? d.spread.slice().reverse().map((s, i) => h24[i] === null ? null : Math.max(0, h24[i] - s)) : null;
+  $('c24h').textContent = mins ? 'Last 24 hours (bar = hourly max, dark mark = hourly low)' : 'Last 24 hours (hourly max)';
+  $('c24').innerHTML = bars(h24, lab24, d.trip, { aria: 'Hourly maximum THC, last 24 hours', mins });
   const d30 = d.daily.slice().reverse(), lab30 = d30.map((_, i) => {
     const t = at(scan, (29 - i) * 1440); return { full: day(t), tick: i % 5 === 4 ? t.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : '' };
   });
@@ -182,19 +225,19 @@ function render(d, scan, isSample) {
     : '<p>None.</p>';
   $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
     + (d.powerup ? ' · <b>power cut inside the window: older data missing</b>' : '')
-    + '<br>Times use this phone\'s clock at the moment of the scan. The readings never leave this device.';
+    + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
 }
 
-// The scan time is stamped into the link the first time it opens (#1.<payload>.<unix seconds>), so a
+// The scan time is stamped into the link the first time it opens (#N.<payload>.<unix seconds>), so a
 // forwarded, bookmarked or reopened link keeps the times of the original scan instead of the reader's clock.
 let shareUrl = '';
-function show(link, now, isSample) {
+function show(link, now, sampleKey) {
   try {
     const d = decode(link), scan = d.scanned || now;
-    render(d, scan, isSample);
-    shareUrl = d.scanned ? link : link.replace(/(#1\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
-    if (!isSample && !d.scanned && link === location.href) history.replaceState(null, '', shareUrl);
-    if (d.scanned && !isSample) $('banner').innerHTML = `<div class="banner">Scanned ${day(scan)} at ${hm(scan)}.</div>`;
+    render(d, scan, sampleKey);
+    shareUrl = d.scanned ? link : link.replace(/(#[12]\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
+    if (!sampleKey && !d.scanned && link === location.href) history.replaceState(null, '', shareUrl);
+    if (d.scanned && !sampleKey) $('banner').innerHTML = `<div class="banner">Scanned ${day(scan)} at ${hm(scan)}.</div>`;
     $('actions').hidden = false;
   } catch (e) { $('banner').innerHTML = `<div class="banner err">${esc(e.message)}</div>`; $('actions').hidden = true; }
 }
@@ -206,9 +249,13 @@ $('share').onclick = async () => {
   } catch (e) { /* share sheet closed */ }
 };
 $('print').onclick = () => window.print();
-$('go').onclick = () => show($('paste').value.trim(), new Date(), false);
-if (location.hash.startsWith('#1.')) show(location.href, new Date(), false);
-else show(SAMPLE, new Date(SAMPLE_SCAN), true);
+$('go').onclick = () => show($('paste').value.trim(), new Date(), null);
+if (/^#[12]\./.test(location.hash)) show(location.href, new Date(), null);
+else {
+  const want = new URLSearchParams(location.search).get('sample');
+  const key = want && SAMPLES[want] ? want : 'room';
+  if (SAMPLES[key]) show(SAMPLES[key].link, new Date(SAMPLES[key].scan), key);
+}
 </script>
 </body>
 </html>
