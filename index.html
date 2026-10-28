@@ -47,6 +47,11 @@ td, th { padding: 6px 4px; border-bottom: 1px solid var(--line); text-align: lef
 th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .foot { font-size: 12px; color: var(--muted); margin-top: 16px; }
 details { margin-top: 16px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; }
+.actions button { margin-top: 0; }
+.actions .alt { background: transparent; color: var(--brand); border: 1px solid var(--brand); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .actions .alt { color: #9CC7A6; border-color: #5E7A66; } }
+@media print { .actions, details, #banner .banner:not(.err) { display: none; } body { background: #fff; } }
 textarea { width: 100%; min-height: 70px; font: 12px monospace; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 8px; }
 button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); border: 0; border-radius: 8px; padding: 9px 14px; font: inherit; cursor: pointer; }
 </style>
@@ -64,6 +69,10 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   <h2>Alarms, last 7 days</h2>
   <div class="card" id="events"></div>
   <div class="foot" id="foot"></div>
+  <div class="actions" id="actions" hidden>
+    <button id="share">Share this log</button>
+    <button id="print" class="alt">Print / save PDF</button>
+  </div>
   <details><summary>Decode another link</summary>
     <textarea id="paste" placeholder="Paste the scanned link here"></textarea>
     <button id="go">Show</button>
@@ -80,7 +89,7 @@ const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function decode(link) {
-  const m = /\/p\/([^#?\/]+)[^#]*#1\.([A-Za-z0-9_-]+)/.exec(link);
+  const m = /\/p\/([^#?\/]+)[^#]*#1\.([A-Za-z0-9_-]+)(?:\.(\d+))?/.exec(link);
   if (!m) throw new Error('Not a remote log link.');
   const b64 = m[2].replace(/-/g, '+').replace(/_/g, '/');
   const raw = atob(b64 + '==='.slice((b64.length + 3) % 4));
@@ -91,7 +100,7 @@ function decode(link) {
   let o = 0;
   const u8 = () => b[o++], u16 = () => { const v = b[o] | (b[o + 1] << 8); o += 2; return v; };
   const ma = v => v === 255 ? null : v / 10;
-  const d = { panel: decodeURIComponent(m[1]) };
+  const d = { panel: decodeURIComponent(m[1]), scanned: m[3] ? new Date(Number(m[3]) * 1000) : null };
   u8();
   const f = u8();
   d.alarm = !!(f & 1); d.silenced = !!(f & 2); d.comms = !!(f & 4); d.powerup = !!(f & 8); d.lim = LIM_TYPES[f >> 4] || LIM_TYPES[0];
@@ -176,10 +185,27 @@ function render(d, scan, isSample) {
     + '<br>Times use this phone\'s clock at the moment of the scan. The readings never leave this device.';
 }
 
-function show(link, scan, isSample) {
-  try { render(decode(link), scan, isSample); }
-  catch (e) { $('banner').innerHTML = `<div class="banner err">${esc(e.message)}</div>`; }
+// The scan time is stamped into the link the first time it opens (#1.<payload>.<unix seconds>), so a
+// forwarded, bookmarked or reopened link keeps the times of the original scan instead of the reader's clock.
+let shareUrl = '';
+function show(link, now, isSample) {
+  try {
+    const d = decode(link), scan = d.scanned || now;
+    render(d, scan, isSample);
+    shareUrl = d.scanned ? link : link.replace(/(#1\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
+    if (!isSample && !d.scanned && link === location.href) history.replaceState(null, '', shareUrl);
+    if (d.scanned && !isSample) $('banner').innerHTML = `<div class="banner">Scanned ${day(scan)} at ${hm(scan)}.</div>`;
+    $('actions').hidden = false;
+  } catch (e) { $('banner').innerHTML = `<div class="banner err">${esc(e.message)}</div>`; $('actions').hidden = true; }
 }
+$('share').onclick = async () => {
+  const data = { title: 'LIM log, ' + $('title').textContent, text: 'LIM remote log', url: shareUrl };
+  try {
+    if (navigator.share) await navigator.share(data);
+    else { await navigator.clipboard.writeText(shareUrl); $('share').textContent = 'Link copied'; setTimeout(() => $('share').textContent = 'Share this log', 2000); }
+  } catch (e) { /* share sheet closed */ }
+};
+$('print').onclick = () => window.print();
 $('go').onclick = () => show($('paste').value.trim(), new Date(), false);
 if (location.hash.startsWith('#1.')) show(location.href, new Date(), false);
 else show(SAMPLE, new Date(SAMPLE_SCAN), true);
