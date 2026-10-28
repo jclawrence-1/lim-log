@@ -60,7 +60,7 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
 </style>
 </head>
 <body>
-<header><div class="k">LIM remote log</div><h1 id="title">Panel</h1></header>
+<header><div class="k" id="kind">LIM remote log</div><h1 id="title">Panel</h1></header>
 <main>
   <div id="banner"></div>
   <div class="grid" id="stats"></div>
@@ -69,10 +69,10 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   <div id="testWrap" hidden><h2>LIM self-tests and remote</h2><div class="grid" id="tests"></div></div>
   <h2 id="c24h">Last 24 hours (hourly max)</h2>
   <div class="card" id="c24"></div>
-  <h2>Last 30 days (daily max)</h2>
+  <h2 id="c30h">Last 30 days (daily max)</h2>
   <div class="card" id="c30"></div>
-  <h2>Alarms, last 7 days</h2>
-  <div class="card" id="events"></div>
+  <div id="evWrap"><h2>Alarms, last 7 days</h2>
+  <div class="card" id="events"></div></div>
   <div class="foot" id="foot"></div>
   <div class="actions" id="actions" hidden>
     <button id="share">Share this log</button>
@@ -84,14 +84,15 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
   </details>
 </main>
 <script>
-// Decoder for the remote log QR, formats v1 to v3 (log-qr-format.md). Everything stays on this device:
+// Decoder for the remote log QR, formats v1 to v4 (log-qr-format.md). v4 = two reports from the remote's
+// report screen: kind 1 THC trend (SILENCE), kind 2 LIM health (TEST). Everything stays on this device:
 // the data is in the link's # part, which browsers never send to a server.
 // SAMPLES is rewritten by make_log_qr.py; ?sample=lim picks the other one.
-const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#3.AxQcMjW-BDXfIAUF0QQzcgo0URsz7iAzjyYvHBwcHBcXFxgXFxgXGBISEhIcHDM1LhwcNTUcGDU1NSYmHBgmJiYmJhwYJiYmJiYcGCYmJiYmEcF3h3d3GBHB8fgRARIIMQAAqAADANgDAAAA4wPjAxIAGAAAQ7I", "scan": "2026-10-28T10:15:00", "label": "Room equipment"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#3.AxQaMi7SBDgdDAMDHQwCxRgC-SACKBoaKhYWFhYnFhYWKhYWFhYqGhouGhoaLio4LDg4LyouLhYaGhoaGhoWGhoaGhoaFhoaGhoaH_EREX8RHxHxER8RAQEBAQdAqD0AAOgFEwTWAAoJJgu6DQDjA60DHABYACRDHQ", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style)"}};
+const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAEUHDI1vgQ13yAFBdEEM3IKNFEbM-4gM48mLxwcHBwXFxcYFxcYFxgSEhISHBwzNS4cHDU1HBg1NTUmJhwYJiYmJiYcGCYmJiYmHBgmJiYmJhHBd4d3dxgRwfH4EQESCDEAAKgAAwDYA3s", "scan": "2026-10-28T10:15:00", "label": "Room equipment: THC trend"}, "room-health": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAIUHDKoAAAAAOMD4wMSABgAAAAAAAAAAAAAAAAAAAAAAJGRkZGRkZGRkZKSkZGSkZGRkZGSkZKRkZGRkpKSkUMDANgDLQ", "scan": "2026-10-28T10:15:00", "label": "Room equipment: LIM health"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAEUGjIu0gQ4HQwDAx0MAsUYAvkgAigaGioWFhYWJxYWFioWFhYWKhoaLhoaGi4qOCw4OC8qLi4WGhoaGhoaFhoaGhoaGhYaGhoaGh_xERF_ER8R8REfEQEBAQEHQKg9AADoBbY", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): THC trend"}, "lim-health": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAIUGjKoEz0M1gAKCSYLug0-ES4S0hNmFr4YNhkmGp4aAOMDrQMcAFgAJCFBRDNXAAAAAAAAAAAAAGlpal1cW1tcXmGHiYeHiIeIh4eHh4iHh4eHh4eKh0MAAOgFQA", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): LIM health"}};
 const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const LINK_RE = /\/p\/([^#?\/]+)[^#]*#([1-3])\.([A-Za-z0-9_-]+)(?:\.(\d+))?/;
+const LINK_RE = /\/p\/([^#?\/]+)[^#]*#([1-4])\.([A-Za-z0-9_-]+)(?:\.(\d+))?/;
 
 function decode(link) {
   const m = LINK_RE.exec(link);
@@ -100,20 +101,32 @@ function decode(link) {
   const raw = atob(b64 + '==='.slice((b64.length + 3) % 4));
   const b = Uint8Array.from(raw, c => c.charCodeAt(0));
   let sum = 0; for (let i = 0; i < b.length - 1; i++) sum = (sum + b[i]) & 255;
-  if (b[0] < 1 || b[0] > 3) throw new Error('Unsupported format version ' + b[0] + '.');
+  if (b[0] < 1 || b[0] > 4) throw new Error('Unsupported format version ' + b[0] + '.');
   if (sum !== b[b.length - 1]) throw new Error('Checksum failed: the scan was damaged. Scan again.');
   let o = 0;
   const u8 = () => b[o++], u16 = () => { const v = b[o] | (b[o + 1] << 8); o += 2; return v; };
   const ma = v => v === 255 ? null : v / 10;
   const d = { panel: decodeURIComponent(m[1]), scanned: m[4] ? new Date(Number(m[4]) * 1000) : null };
   d.v = u8();
+  d.kind = d.v >= 4 ? u8() : 0;                    // 0 = everything in one code (v1-v3)
   const f = u8();
   d.alarm = !!(f & 1); d.silenced = !!(f & 2); d.comms = !!(f & 4); d.powerup = !!(f & 8); d.lim = LIM_TYPES[f >> 4] || LIM_TYPES[0];
   d.now = ma(u8()); d.trip = u8() || null; if (d.trip) d.trip /= 10;
+  d.events = []; d.fails = [];
+  if (d.kind === 2) {
+    d.selftests7 = u8(); d.stFail7 = u8(); d.stJumps7 = u8();
+    const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
+    d.lastErr = u8(); readCal();
+    d.dailyFails = []; for (let i = 0; i < 15; i++) { const x = u8(); d.dailyFails.push(x & 15, x >> 4); }
+    d.dailyRatio = Array.from({ length: 30 }, () => { const x = u8(); return x === 255 ? null : 0.85 + x / 1000; });
+    readHealth();
+    d.commsErr = u16(); d.uptimeH = u16();
+    return flags();
+  }
   d.max24 = { ma: ma(u8()), ago: u16() };
   d.max7 = { ma: ma(u8()), ago: u16() };
   d.alarms7 = u8();
-  const n = u8(); d.events = [];
+  const n = u8();
   for (let i = 0; i < n; i++) { const ago = u16(), dur = u8(); d.events.push({ ago, dur }); }
   d.hourly = Array.from({ length: 24 }, () => ma(u8()));
   d.daily = Array.from({ length: 30 }, () => ma(u8()));
@@ -124,16 +137,26 @@ function decode(link) {
     d.steps24 = u8(); d.steps7 = u8(); d.spikes24 = u8(); d.spikes7 = u8(); d.selftests7 = u8(); d.stJumps7 = u8();
   }
   d.commsErr = u16(); d.uptimeH = u16();
-  if (d.v >= 3) {
+  if (d.v === 3) {
     d.stFail7 = u8();
     const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
-    d.lastErr = u8();
+    d.lastErr = u8(); readCal(); readHealth();
+  }
+  return flags();
+  function readCal() {
     const ratio = u16(), ratioMin = u16(), off = u16(), offMax = u16(), bad = u8();
     d.cal = ratio === 0xFFFF ? null : { ratio: ratio / 1000, ratioMin: ratioMin / 1000, offset: off > 32767 ? off - 65536 : off, offsetMax: offMax, bad };
+  }
+  function readHealth() {
     const h = u8();
     d.health = { flash: !!(h & 1), supply: !!(h & 2), busErr: !!(h & 4), wdt: (h >> 3) & 7, keys: !!(h & 64) };
   }
-  return d;
+  function flags() {
+    d.hasTrend = d.kind !== 2;                     // THC charts + alarm list
+    d.hasSwing = d.v >= 2 && d.kind !== 2;         // steps / spikes
+    d.hasTests = d.v === 3 || d.kind === 2;        // graded self-tests + remote health
+    return d;
+  }
 }
 
 // Self-test grading limits, Series D cal block (same rules as the bench tool cal_parse.py)
@@ -158,12 +181,12 @@ function bars(vals, labels, trip, opts) {
     if (v === null) return;
     const c = trip && v >= trip ? css('--bar-alarm') : trip && v >= 0.8 * trip ? css('--bar-hi') : css('--bar');
     const lo = opts.mins ? opts.mins[i] : null;
-    s += `<rect x="${L + i * bw + 1}" y="${y(v)}" width="${Math.max(1, bw - 2)}" height="${H - B - y(v)}" rx="1.5" fill="${c}"><title>${esc(labels[i].full)}: ${lo !== null ? `${lo.toFixed(1)} to ` : ''}${v.toFixed(1)} mA</title></rect>`;
+    s += `<rect x="${L + i * bw + 1}" y="${y(v)}" width="${Math.max(1, bw - 2)}" height="${H - B - y(v)}" rx="1.5" fill="${c}"><title>${esc(labels[i].full)}: ${lo !== null ? `${lo.toFixed(1)} to ` : ''}${opts.fmt ? opts.fmt(v) : v.toFixed(1) + ' mA'}</title></rect>`;
     if (lo !== null && v - lo >= 0.2) s += `<line x1="${L + i * bw + 2}" x2="${L + (i + 1) * bw - 2}" y1="${y(lo)}" y2="${y(lo)}" stroke="${css('--ink')}" stroke-width="2" opacity=".55"/>`;
     if (opts.marks && opts.marks.has(i)) s += `<path d="M${L + i * bw + bw / 2 - 5},${T + 1} h10 l-5,8 z" fill="${css('--red')}"><title>${esc(labels[i].full)}: failed LIM self-test</title></path>`;
     if (labels[i].tick) s += `<text x="${L + i * bw + bw / 2}" y="${H - 6}" text-anchor="middle">${esc(labels[i].tick)}</text>`;
   });
-  if (trip) s += `<line x1="${L}" x2="${W - R}" y1="${y(trip)}" y2="${y(trip)}" stroke="${css('--red')}" stroke-dasharray="4 3"/><text x="${L + 4}" y="${y(trip) - 4}" text-anchor="start" style="fill:${css('--red')};paint-order:stroke;stroke:${css('--card')};stroke-width:4px;font-weight:600">LIM trip ${trip.toFixed(1)} mA</text>`;
+  if (trip) s += `<line x1="${L}" x2="${W - R}" y1="${y(trip)}" y2="${y(trip)}" stroke="${css('--red')}" stroke-dasharray="4 3"/><text x="${L + 4}" y="${y(trip) - 4}" text-anchor="start" style="fill:${css('--red')};paint-order:stroke;stroke:${css('--card')};stroke-width:4px;font-weight:600">${esc(opts.tripLabel || `LIM trip ${trip.toFixed(1)} mA`)}</text>`;
   return s + '</svg>';
 }
 
@@ -171,7 +194,7 @@ function bars(vals, labels, trip, opts) {
 function findings(d, scan, ev) {
   const out = [];
   let lim = false, room = false;
-  if (d.v >= 3 && (d.stFail7 > 0 || d.lastErr)) {
+  if (d.hasTests && (d.stFail7 > 0 || d.lastErr)) {
     lim = true;
     const last = d.fails.length ? at(scan, d.fails[0]) : null;
     const why = [];
@@ -181,10 +204,10 @@ function findings(d, scan, ev) {
     if (d.lastErr) why.push(`last LIM error #${d.lastErr}${SD_ERR[d.lastErr] ? ' (' + SD_ERR[d.lastErr] + ')' : ''}`);
     out.push(`<b>${d.stFail7} of ${d.selftests7} LIM self-tests failed this week</b>${last ? `, the newest ${day(last)} ${hm(last)}` : ''}${why.length ? ': ' + why.join('; ') : ''}. The LIM is failing its own check. That is what a bench soak looks for: send it in.`);
   }
-  if (d.v >= 2) {
+  if (d.hasSwing || d.kind === 2) {
     const frac = d.selftests7 ? d.stJumps7 / d.selftests7 : 0;
     if (d.stJumps7 >= 3 && frac >= 0.15) { lim = true; out.push(`<b>Jumps at ${d.stJumps7} of ${d.selftests7} LIM self-tests this week.</b> The reading moves when the LIM tests itself, not when the room changes: suspect the LIM.`); }
-    if (d.spikes7 >= 10) { lim = true; out.push(`<b>${plural(d.spikes7, 'one-reading spike')} this week</b> (${d.spikes24} in 24 h): the reading jumps and comes straight back. Suspect the LIM or its connections.`); }
+    if (d.hasSwing && d.spikes7 >= 10) { lim = true; out.push(`<b>${plural(d.spikes7, 'one-reading spike')} this week</b> (${d.spikes24} in 24 h): the reading jumps and comes straight back. Suspect the LIM or its connections.`); }
   }
   if (ev.length) {
     const hrs = ev.map(e => e.t.getHours() + e.t.getMinutes() / 60);
@@ -195,35 +218,43 @@ function findings(d, scan, ev) {
     else if (short) { lim = true; out.push(`<b>${plural(d.alarms7, 'alarm')}, each lasting a minute or two, at scattered times.</b> Short alarms with no pattern are typical of a LIM glitch rather than a load.`); }
     else out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days,</b> no single time of day stands out.`);
   }
-  if (d.v >= 2 && (d.steps24 >= 4 || d.steps7 >= 15) && !lim) {
+  if (d.hasSwing && (d.steps24 >= 4 || d.steps7 >= 15) && !lim) {
     room = true;
     out.push(`<b>${plural(d.steps24, 'step')} in 24 h (${d.steps7} this week), none at self-tests.</b> The reading rises, holds for a while, then drops: looks like equipment switching on and off (a battery charger, thermostat or battery check). Check what stays plugged in.`);
   }
-  if (d.v >= 3 && d.health && !(d.health.flash && d.health.supply && d.health.keys) ) out.push(`<b>The remote itself reports a problem</b> (see Remote below). Fix the remote before trusting the log.`);
-  if (d.v >= 2 && !lim) out.push(`LIM self-tests look clean: ${d.stJumps7} of ${d.selftests7} with a jump.`);
-  const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')] : ['Nothing stands out', css('--ok')];
+  if (d.hasTests && d.health && !(d.health.flash && d.health.supply && d.health.keys) ) out.push(`<b>The remote itself reports a problem</b> (see Remote below). Fix the remote before trusting the log.`);
+  if ((d.hasSwing || d.kind === 2) && !lim) out.push(`LIM self-tests look clean: ${d.hasTests ? `${d.stFail7} failed, ` : ''}${d.stJumps7} of ${d.selftests7} with a jump.`);
+  const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')]
+    : d.kind === 2 ? ['LIM passes its self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
   $('insight').style.borderLeftColor = head[1];
-  return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || '<li>No alarms, steps or spikes in 7 days.</li>'}</ul>`;
+  return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || `<li>${d.kind === 2 ? 'No failed self-tests and no LIM errors.' : 'No alarms, steps or spikes in 7 days.'}</li>`}</ul>`;
 }
 
 function render(d, scan, sampleKey) {
   $('title').textContent = 'Panel ' + d.panel;
+  $('kind').textContent = d.kind === 1 ? 'THC trend report' : d.kind === 2 ? 'LIM health report' : 'LIM remote log';
   $('banner').innerHTML = sampleKey ? `<div class="banner">Sample data (made-up Series D panel), times as if scanned ${day(scan)} at ${hm(scan)}. Samples: ${Object.entries(SAMPLES).map(([k, s]) => k === sampleKey ? `<b>${esc(s.label)}</b>` : `<a href="?sample=${k}">${esc(s.label)}</a>`).join(' · ')}</div>` : '';
   const st = d.alarm ? ['ALARM', css('--red')] : d.now !== null && d.trip && d.now >= 0.8 * d.trip ? ['RISING', css('--amber')] : ['NORMAL', css('--ok')];
-  const m24 = at(scan, d.max24.ago), m7 = at(scan, d.max7.ago);
   const card = ([l, v, s]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
   const mA = v => v === null ? '–' : v.toFixed(1) + ' <small>mA</small>';
-  $('stats').innerHTML = [
+  const m24 = d.hasTrend ? at(scan, d.max24.ago) : null, m7 = d.hasTrend ? at(scan, d.max7.ago) : null;
+  const lastFail = d.fails.length ? at(scan, d.fails[0]) : null;
+  $('stats').innerHTML = (d.kind === 2 ? [
+    ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
+    ['Self-tests, 7 days', d.selftests7, 'run by the LIM'],
+    ['Failed', d.stFail7 ? `<span style="color:${css('--red')}">${d.stFail7}</span>` : 0, 'last 7 days'],
+    ['Last failure', lastFail ? `${hm(lastFail)}` : 'none', lastFail ? day(lastFail) : 'in the last 30 days'],
+  ] : [
     ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
     ['24 h max', mA(d.max24.ma), `${day(m24)} ${hm(m24)}`],
     ['7 day max', mA(d.max7.ma), `${day(m7)} ${hm(m7)}`],
     ['Alarms, 7 days', d.alarms7, d.trip ? `trip ${d.trip.toFixed(1)} mA` : ''],
-  ].map(card).join('');
+  ]).map(card).join('');
 
   const ev = d.events.map(e => ({ t: at(scan, e.ago), dur: e.dur }));
   $('insight').innerHTML = findings(d, scan, ev);
 
-  if (d.v >= 2) {
+  if (d.hasSwing) {
     const qt = at(scan, d.quiet.hAgo * 60);
     $('stab').innerHTML = [
       ['Steadiest hour moved', mA(d.quiet.ma), `${hr12(qt.getHours())}, ${day(qt)}`],
@@ -234,13 +265,13 @@ function render(d, scan, sampleKey) {
     $('stabWrap').hidden = false;
   } else $('stabWrap').hidden = true;
 
-  if (d.v >= 3) {
+  if (d.hasTests) {
     const h = d.health, probs = [];
     if (!h.flash) probs.push('log memory'); if (!h.supply) probs.push('supply'); if (!h.keys) probs.push('a key stuck');
     if (h.busErr) probs.push('bus errors high'); if (h.wdt) probs.push(plural(h.wdt, 'restart'));
     const c = d.cal, flag = (bad, txt) => bad ? `<span style="color:${css('--red')}">${txt}</span>` : txt;
     $('tests').innerHTML = [
-      ['Self-tests failed', flag(d.stFail7, `${d.stFail7} <small>of ${d.selftests7}</small>`), 'last 7 days'],
+      ...(d.kind === 2 ? [] : [['Self-tests failed', flag(d.stFail7, `${d.stFail7} <small>of ${d.selftests7}</small>`), 'last 7 days']]),
       ...(c ? [
         ['L1:L2 ratio', flag(c.ratioMin < RATIO_MIN, c.ratioMin.toFixed(3)), `lowest this week; last ${c.ratio.toFixed(3)} (healthy ~1.00)`],
         ['Offset', flag(c.offsetMax > OFFSET_MAX, `${c.offsetMax} <small>mV</small>`), `highest this week; last ${c.offset} mV`],
@@ -250,10 +281,31 @@ function render(d, scan, sampleKey) {
     ].map(card).join('');
     $('testWrap').hidden = false;
   } else $('testWrap').hidden = true;
-  const failAt = d.v >= 3 ? d.fails : [];
+  const failAt = d.hasTests ? d.fails : [];
   const fail24 = new Set(failAt.filter(a => a < 1440).map(a => 23 - Math.floor(a / 60)));
   const fail30 = new Set(failAt.filter(a => a < 30 * 1440).map(a => 29 - Math.floor(a / 1440)));
 
+  $('evWrap').hidden = !d.hasTrend;
+  const dayLab = n => Array.from({ length: n }, (_, i) => {
+    const t = at(scan, (n - 1 - i) * 1440); return { full: day(t), tick: i % 5 === 4 ? t.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : '' };
+  });
+  if (!d.hasTrend) {
+    const hasRatio = d.dailyRatio.some(r => r !== null);
+    $('c24h').hidden = $('c24').hidden = !hasRatio;
+    if (hasRatio) {
+      $('c24h').textContent = 'L1:L2 imbalance, worst self-test each day (%)';
+      $('c24').innerHTML = bars(d.dailyRatio.slice().reverse().map(r => r === null ? null : Math.max(0, (1 - r) * 100)), dayLab(30), (1 - RATIO_MIN) * 100,
+        { aria: 'Worst L1:L2 imbalance per day, last 30 days', tripLabel: `fails over ${((1 - RATIO_MIN) * 100).toFixed(0)} % (ratio ${RATIO_MIN})`, fmt: v => `ratio ${(1 - v / 100).toFixed(3)}` });
+    }
+    $('c30h').textContent = 'Failed self-tests per day, last 30 days';
+    $('c30').innerHTML = bars(d.dailyFails.slice().reverse(), dayLab(30), 1, { aria: 'Failed self-tests per day', tripLabel: 'any = fail', fmt: v => plural(v, 'failed test') });
+    $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
+      + '<br>For the THC trend, press SILENCE on the remote\'s report screen.'
+      + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
+    return;
+  }
+  $('c24h').hidden = $('c24').hidden = false;
+  $('c30h').textContent = 'Last 30 days (daily max)';
   const h24 = d.hourly.slice().reverse(), lab24 = h24.map((_, i) => {
     const t = at(scan, (23 - i) * 60); return { full: `${day(t)} ${hr12(t.getHours())}`, tick: i % 3 === 0 ? hr12(t.getHours()) : '' };
   });
@@ -271,6 +323,7 @@ function render(d, scan, sampleKey) {
     : '<p>None.</p>';
   $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
     + (d.powerup ? ' · <b>power cut inside the window: older data missing</b>' : '')
+    + (d.kind === 1 ? '<br>For LIM self-tests and the remote\'s own check, press TEST on the remote\'s report screen.' : '')
     + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
 }
 
@@ -281,7 +334,7 @@ function show(link, now, sampleKey) {
   try {
     const d = decode(link), scan = d.scanned || now;
     render(d, scan, sampleKey);
-    shareUrl = d.scanned ? link : link.replace(/(#[1-3]\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
+    shareUrl = d.scanned ? link : link.replace(/(#[1-4]\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
     if (!sampleKey && !d.scanned && link === location.href) history.replaceState(null, '', shareUrl);
     if (d.scanned && !sampleKey) $('banner').innerHTML = `<div class="banner">Scanned ${day(scan)} at ${hm(scan)}.</div>`;
     $('actions').hidden = false;
@@ -296,7 +349,7 @@ $('share').onclick = async () => {
 };
 $('print').onclick = () => window.print();
 $('go').onclick = () => show($('paste').value.trim(), new Date(), null);
-if (/^#[1-3]\./.test(location.hash)) show(location.href, new Date(), null);
+if (/^#[1-4]\./.test(location.hash)) show(location.href, new Date(), null);
 else {
   const want = new URLSearchParams(location.search).get('sample');
   const key = want && SAMPLES[want] ? want : 'room';
