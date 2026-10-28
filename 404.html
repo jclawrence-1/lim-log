@@ -88,7 +88,7 @@ button { margin-top: 6px; background: var(--brand); color: var(--brand-ink); bor
 // report screen: kind 1 THC trend (SILENCE), kind 2 LIM health (TEST). Everything stays on this device:
 // the data is in the link's # part, which browsers never send to a server.
 // SAMPLES is rewritten by make_log_qr.py; ?sample=lim picks the other one.
-const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAEUHDI1vgQ13yAFBdEEM3IKNFEbM-4gM48mLxwcHBwXFxcYFxcYFxgSEhISHBwzNS4cHDU1HBg1NTUmJhwYJiYmJiYcGCYmJiYmHBgmJiYmJhHBd4d3dxgRwfH4EQESCDEAAKgAAwDYA3s", "scan": "2026-10-28T10:15:00", "label": "Room equipment: THC trend"}, "room-health": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAIUHDKoAAAAAOMD4wMSABgAAAAAAAAAAAAAAAAAAAAAAJGRkZGRkZGRkZKSkZGSkZGRkZGSkZKRkZGRkpKSkUMDANgDLQ", "scan": "2026-10-28T10:15:00", "label": "Room equipment: LIM health"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAEUGjIu0gQ4HQwDAx0MAsUYAvkgAigaGioWFhYWJxYWFioWFhYWKhoaLhoaGi4qOCw4OC8qLi4WGhoaGhoaFhoaGhoaGhYaGhoaGh_xERF_ER8R8REfEQEBAQEHQKg9AADoBbY", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): THC trend"}, "lim-health": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAIUGjKoEz0M1gAKCSYLug0-ES4S0hNmFr4YNhkmGp4aAOMDrQMcAFgAJCFBRDNXAAAAAAAAAAAAAGlpal1cW1tcXmGHiYeHiIeIh4eHh4iHh4eHh4eKh0MAAOgFQA", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): LIM health"}};
+const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAEUHDI1vgQ13yAFBdEEM3IKNFEbM-4gM48mLxwcHBwXFxcYFxcYFxgSEhISHBwzNS4cHDU1HBg1NTUmJhwYJiYmJiYcGCYmJiYmHBgmJiYmJhHBd4d3dxgRwfH4EQESCDEAAKgAAwDYA3s", "scan": "2026-10-28T10:15:00", "label": "Room equipment: THC trend"}, "room-health": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3Q#4.BAIUHDKoAAMAAAAAAAAAAAAAAAAAAAAAAADjA-MDEgAYAACRkZGRkZGRkZGSkpGRkpGRkZGRkpGSkZGRkZKSkpFDAwDYAzA", "scan": "2026-10-28T10:15:00", "label": "Room equipment: LIM health"}, "lim": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAEUGjIu0gQ4HQwDAx0MAsUYAvkgAigaGioWFhYWJxYWFioWFhYWKhoaLhoaGi4qOCw4OC8qLi4WGhoaGhoaFhoaGhoaGhYaGhoaGh_xERF_ER8R8REfEQEBAQEHQKg9AADoBbY", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): THC trend"}, "lim-health": {"link": "https://jclawrence-1.github.io/lim-log/p/B2M9X#4.BAIUGjKoPQMTDNYACgkmC7oNPhEuEtITZha-GDYZJhqeGgAhQUQzVwAAAAAAAAAAAADjA60DHABYACRpaWpdXFtbXF5hh4mHh4iHiIeHh4eIh4eHh4eHiodDAADoBUM", "scan": "2026-10-28T10:15:00", "label": "LIM fault (Catawba-style): LIM health"}, "pg-health": {"link": "https://jclawrence-1.github.io/lim-log/p/C4P7R#4.BAI0HDKoAABDAwDYA1E", "scan": "2026-10-28T10:15:00", "label": "PG Mark IV (start-only): LIM health"}};
 const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
@@ -114,11 +114,20 @@ function decode(link) {
   d.now = ma(u8()); d.trip = u8() || null; if (d.trip) d.trip /= 10;
   d.events = []; d.fails = [];
   if (d.kind === 2) {
-    d.selftests7 = u8(); d.stFail7 = u8(); d.stJumps7 = u8();
-    const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
-    d.lastErr = u8(); readCal();
-    d.dailyFails = []; for (let i = 0; i < 15; i++) { const x = u8(); d.dailyFails.push(x & 15, x >> 4); }
-    d.dailyRatio = Array.from({ length: 30 }, () => { const x = u8(); return x === 255 ? null : 0.85 + x / 1000; });
+    // Only what the LIM reports: detail bit 0 = pass/fail graded, bit 1 = Series D cal block
+    d.selftests7 = u8(); d.stJumps7 = u8();
+    const detail = u8();
+    d.graded = !!(detail & 1); d.cal = null; d.dailyRatio = null; d.dailyFails = null; d.stFail7 = 0; d.lastErr = 0;
+    if (d.graded) {
+      d.stFail7 = u8();
+      const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
+      d.lastErr = u8();
+      d.dailyFails = []; for (let i = 0; i < 15; i++) { const x = u8(); d.dailyFails.push(x & 15, x >> 4); }
+    }
+    if (detail & 2) {
+      readCal();
+      d.dailyRatio = Array.from({ length: 30 }, () => { const x = u8(); return x === 255 ? null : 0.85 + x / 1000; });
+    }
     readHealth();
     d.commsErr = u16(); d.uptimeH = u16();
     return flags();
@@ -152,6 +161,7 @@ function decode(link) {
     d.health = { flash: !!(h & 1), supply: !!(h & 2), busErr: !!(h & 4), wdt: (h >> 3) & 7, keys: !!(h & 64) };
   }
   function flags() {
+    if (d.graded === undefined) d.graded = d.v === 3;
     d.hasTrend = d.kind !== 2;                     // THC charts + alarm list
     d.hasSwing = d.v >= 2 && d.kind !== 2;         // steps / spikes
     d.hasTests = d.v === 3 || d.kind === 2;        // graded self-tests + remote health
@@ -223,9 +233,10 @@ function findings(d, scan, ev) {
     out.push(`<b>${plural(d.steps24, 'step')} in 24 h (${d.steps7} this week), none at self-tests.</b> The reading rises, holds for a while, then drops: looks like equipment switching on and off (a battery charger, thermostat or battery check). Check what stays plugged in.`);
   }
   if (d.hasTests && d.health && !(d.health.flash && d.health.supply && d.health.keys) ) out.push(`<b>The remote itself reports a problem</b> (see Remote below). Fix the remote before trusting the log.`);
-  if ((d.hasSwing || d.kind === 2) && !lim) out.push(`LIM self-tests look clean: ${d.hasTests ? `${d.stFail7} failed, ` : ''}${d.stJumps7} of ${d.selftests7} with a jump.`);
+  if ((d.hasSwing || d.kind === 2) && !lim) out.push(`LIM self-tests look clean: ${d.hasTests && d.graded ? `${d.stFail7} failed, ` : ''}${d.stJumps7} of ${d.selftests7} with a jump.`);
+  if (d.kind === 2 && !d.graded) out.push(`This LIM only reports that a self-test ran, not whether it passed. The remote still checks whether the reading jumps at each test.`);
   const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')]
-    : d.kind === 2 ? ['LIM passes its self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
+    : d.kind === 2 ? [d.graded ? 'LIM passes its self-tests' : 'Nothing stands out at self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
   $('insight').style.borderLeftColor = head[1];
   return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || `<li>${d.kind === 2 ? 'No failed self-tests and no LIM errors.' : 'No alarms, steps or spikes in 7 days.'}</li>`}</ul>`;
 }
@@ -233,7 +244,7 @@ function findings(d, scan, ev) {
 function render(d, scan, sampleKey) {
   $('title').textContent = 'Panel ' + d.panel;
   $('kind').textContent = d.kind === 1 ? 'THC trend report' : d.kind === 2 ? 'LIM health report' : 'LIM remote log';
-  $('banner').innerHTML = sampleKey ? `<div class="banner">Sample data (made-up Series D panel), times as if scanned ${day(scan)} at ${hm(scan)}. Samples: ${Object.entries(SAMPLES).map(([k, s]) => k === sampleKey ? `<b>${esc(s.label)}</b>` : `<a href="?sample=${k}">${esc(s.label)}</a>`).join(' · ')}</div>` : '';
+  $('banner').innerHTML = sampleKey ? `<div class="banner">Sample data (made-up ${esc(d.lim)} panel), times as if scanned ${day(scan)} at ${hm(scan)}. Samples: ${Object.entries(SAMPLES).map(([k, s]) => k === sampleKey ? `<b>${esc(s.label)}</b>` : `<a href="?sample=${k}">${esc(s.label)}</a>`).join(' · ')}</div>` : '';
   const st = d.alarm ? ['ALARM', css('--red')] : d.now !== null && d.trip && d.now >= 0.8 * d.trip ? ['RISING', css('--amber')] : ['NORMAL', css('--ok')];
   const card = ([l, v, s]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
   const mA = v => v === null ? '–' : v.toFixed(1) + ' <small>mA</small>';
@@ -242,8 +253,13 @@ function render(d, scan, sampleKey) {
   $('stats').innerHTML = (d.kind === 2 ? [
     ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
     ['Self-tests, 7 days', d.selftests7, 'run by the LIM'],
-    ['Failed', d.stFail7 ? `<span style="color:${css('--red')}">${d.stFail7}</span>` : 0, 'last 7 days'],
-    ['Last failure', lastFail ? `${hm(lastFail)}` : 'none', lastFail ? day(lastFail) : 'in the last 30 days'],
+    ...(d.graded ? [
+      ['Failed', d.stFail7 ? `<span style="color:${css('--red')}">${d.stFail7}</span>` : 0, 'last 7 days'],
+      ['Last failure', lastFail ? `${hm(lastFail)}` : 'none', lastFail ? day(lastFail) : 'in the last 30 days'],
+    ] : [
+      ['Jumps at self-tests', d.stJumps7, 'last 7 days'],
+      ['Pass / fail', '–', 'this LIM only reports that a test ran'],
+    ]),
   ] : [
     ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
     ['24 h max', mA(d.max24.ma), `${day(m24)} ${hm(m24)}`],
@@ -271,12 +287,12 @@ function render(d, scan, sampleKey) {
     if (h.busErr) probs.push('bus errors high'); if (h.wdt) probs.push(plural(h.wdt, 'restart'));
     const c = d.cal, flag = (bad, txt) => bad ? `<span style="color:${css('--red')}">${txt}</span>` : txt;
     $('tests').innerHTML = [
-      ...(d.kind === 2 ? [] : [['Self-tests failed', flag(d.stFail7, `${d.stFail7} <small>of ${d.selftests7}</small>`), 'last 7 days']]),
+      ...(d.kind === 2 || !d.graded ? [] : [['Self-tests failed', flag(d.stFail7, `${d.stFail7} <small>of ${d.selftests7}</small>`), 'last 7 days']]),
       ...(c ? [
         ['L1:L2 ratio', flag(c.ratioMin < RATIO_MIN, c.ratioMin.toFixed(3)), `lowest this week; last ${c.ratio.toFixed(3)} (healthy ~1.00)`],
         ['Offset', flag(c.offsetMax > OFFSET_MAX, `${c.offsetMax} <small>mV</small>`), `highest this week; last ${c.offset} mV`],
         ['Bad Tests count', c.bad, "the LIM's own counter"],
-      ] : [['Test detail', '–', 'this LIM reports start only']]),
+      ] : d.kind === 2 ? [] : [['Test detail', '–', 'no cal values from this LIM']]),
       ['Remote', probs.length ? flag(true, 'Check') : 'OK', probs.length ? probs.join(', ') : 'self-check passed'],
     ].map(card).join('');
     $('testWrap').hidden = false;
@@ -290,21 +306,22 @@ function render(d, scan, sampleKey) {
     const t = at(scan, (n - 1 - i) * 1440); return { full: day(t), tick: i % 5 === 4 ? t.toLocaleDateString([], { month: 'numeric', day: 'numeric' }) : '' };
   });
   if (!d.hasTrend) {
-    const hasRatio = d.dailyRatio.some(r => r !== null);
+    const hasRatio = !!d.dailyRatio && d.dailyRatio.some(r => r !== null);
     $('c24h').hidden = $('c24').hidden = !hasRatio;
     if (hasRatio) {
       $('c24h').textContent = 'L1:L2 imbalance, worst self-test each day (%)';
       $('c24').innerHTML = bars(d.dailyRatio.slice().reverse().map(r => r === null ? null : Math.max(0, (1 - r) * 100)), dayLab(30), (1 - RATIO_MIN) * 100,
         { aria: 'Worst L1:L2 imbalance per day, last 30 days', tripLabel: `fails over ${((1 - RATIO_MIN) * 100).toFixed(0)} % (ratio ${RATIO_MIN})`, fmt: v => `ratio ${(1 - v / 100).toFixed(3)}` });
     }
+    $('c30h').hidden = $('c30').hidden = !d.dailyFails;
     $('c30h').textContent = 'Failed self-tests per day, last 30 days';
-    $('c30').innerHTML = bars(d.dailyFails.slice().reverse(), dayLab(30), 1, { aria: 'Failed self-tests per day', tripLabel: 'any = fail', fmt: v => plural(v, 'failed test') });
+    if (d.dailyFails) $('c30').innerHTML = bars(d.dailyFails.slice().reverse(), dayLab(30), 1, { aria: 'Failed self-tests per day', tripLabel: 'any = fail', fmt: v => plural(v, 'failed test') });
     $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
       + '<br>For the THC trend, press SILENCE on the remote\'s report screen.'
       + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
     return;
   }
-  $('c24h').hidden = $('c24').hidden = false;
+  $('c24h').hidden = $('c24').hidden = $('c30h').hidden = $('c30').hidden = false;
   $('c30h').textContent = 'Last 30 days (daily max)';
   const h24 = d.hourly.slice().reverse(), lab24 = h24.map((_, i) => {
     const t = at(scan, (23 - i) * 60); return { full: `${day(t)} ${hr12(t.getHours())}`, tick: i % 3 === 0 ? hr12(t.getHours()) : '' };
