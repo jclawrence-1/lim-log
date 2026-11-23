@@ -93,7 +93,7 @@ const SAMPLES = {"room": {"link": "https://jclawrence-1.github.io/lim-log/p/A7K3
 const LIM_TYPES = ['Unknown LIM', 'Square D Series D', 'IPS Sentry 5', 'PG Mark IV', 'PG Mark V / SafeDetec', 'Schneider Series 6 / Bender', 'PG Mark III (adapter)', 'MainPro adapter'];
 const $ = id => document.getElementById(id);
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-const LINK_RE = /\/p\/([^#?\/]+)[^#]*#([1-4])\.([A-Za-z0-9_-]+)(?:\.(\d+))?/;
+const LINK_RE = /\/p\/([^#?\/]+)[^#]*#([1-5])\.([A-Za-z0-9_-]+)(?:\.(\d+))?/;
 
 function decode(link) {
   const m = LINK_RE.exec(link);
@@ -102,7 +102,7 @@ function decode(link) {
   const raw = atob(b64 + '==='.slice((b64.length + 3) % 4));
   const b = Uint8Array.from(raw, c => c.charCodeAt(0));
   let sum = 0; for (let i = 0; i < b.length - 1; i++) sum = (sum + b[i]) & 255;
-  if (b[0] < 1 || b[0] > 4) throw new Error('Unsupported format version ' + b[0] + '.');
+  if (b[0] < 1 || b[0] > 5) throw new Error('Unsupported format version ' + b[0] + '.');
   if (sum !== b[b.length - 1]) throw new Error('Checksum failed: the scan was damaged. Scan again.');
   let o = 0;
   const u8 = () => b[o++], u16 = () => { const v = b[o] | (b[o + 1] << 8); o += 2; return v; };
@@ -121,7 +121,8 @@ function decode(link) {
     d.graded = !!(detail & 1); d.cal = null; d.dailyRatio = null; d.dailyFails = null; d.stFail7 = 0; d.lastErr = 0;
     if (d.graded) {
       d.stFail7 = u8();
-      const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
+      const nf = u8(); d.fails = []; d.failWhy = [];
+      for (let i = 0; i < nf; i++) { d.fails.push(u16()); if (d.v >= 5) d.failWhy.push(u8()); }   // v5: + reason code
       d.lastErr = u8();
       d.dailyFails = []; for (let i = 0; i < 15; i++) { const x = u8(); d.dailyFails.push(x & 15, x >> 4); }
     }
@@ -130,9 +131,11 @@ function decode(link) {
       d.dailyRatio = Array.from({ length: 30 }, () => { const x = u8(); return x === 255 ? null : 0.85 + x / 1000; });
     }
     readHealth();
+    if (d.v >= 5) { d.missedAuto = u8(); d.missedAgo = u16(); }   // v5: PG Mark IV automatic self-tests missed (25 h without one)
     d.recent = [];
     if (detail & 4) { const n = u8(); for (let i = 0; i < n; i++) { const sec = u16(), type = u8(), val = u8(); d.recent.push({ sec, type, val }); } }
     d.commsErr = u16(); d.uptimeH = u16();
+    if (d.v >= 5) readGaps();
     return flags();
   }
   d.max24 = { ma: ma(u8()), ago: u16() };
@@ -147,8 +150,10 @@ function decode(link) {
     for (let i = 0; i < 12; i++) { const x = u8(); d.spread.push((x & 15) / 10, (x >> 4) / 10); }
     d.quiet = { ma: ma(u8()), hAgo: u8() };
     d.steps24 = u8(); d.steps7 = u8(); d.spikes24 = u8(); d.spikes7 = u8(); d.selftests7 = u8(); d.stJumps7 = u8();
+    if (d.v >= 5) d.trendFail7 = u8();             // v5: failed self-tests 7 d (pass / fail is in the LIM health report)
   }
   d.commsErr = u16(); d.uptimeH = u16();
+  if (d.v >= 5) readGaps();
   if (d.v === 3) {
     d.stFail7 = u8();
     const nf = u8(); d.fails = Array.from({ length: nf }, () => u16());
@@ -157,7 +162,15 @@ function decode(link) {
   return flags();
   function readCal() {
     const ratio = u16(), ratioMin = u16(), off = u16(), offMax = u16(), bad = u8();
-    d.cal = ratio === 0xFFFF ? null : { ratio: ratio / 1000, ratioMin: ratioMin / 1000, offset: off > 32767 ? off - 65536 : off, offsetMax: offMax, bad };
+    // offset 0x8000 / offset max 0xFFFF = not reported (2026-11-23: the remote gets the ratio and Bad Tests from the
+    // Series D comms box, but no offset)
+    d.cal = ratio === 0xFFFF ? null : { ratio: ratio / 1000, ratioMin: ratioMin / 1000, offset: off === 0x8000 ? null : off > 32767 ? off - 65536 : off, offsetMax: offMax === 0xFFFF ? null : offMax, bad };
+  }
+  // v5: power-ups since the record started (each one = an off time of unknown length: the remote has no clock), powered
+  // hours in the record, record flags (bit 0 = includes an imported laptop log), then the newest power-ups, minutes ago.
+  function readGaps() {
+    d.boots = u8(); d.recordH = u16(); const rf = u8(); d.imported = !!(rf & 1);
+    const n = u8(); d.gaps = Array.from({ length: n }, () => u16());
   }
   function readHealth() {
     const h = u8();
@@ -173,7 +186,14 @@ function decode(link) {
 }
 
 // Self-test grading limits, Series D cal block (same rules as the bench tool cal_parse.py)
-const RATIO_MIN = 0.97, OFFSET_MAX = 60;
+// 2026-11-23: the Series D's own self-test limits have NO offset limit (Bench Guide fw_selftest_limits_20261121: Test
+// Imped. 37.8-42.6 K, L1:L2 0.80-1.20, injection 22.75-43.75 uA, + coded errors). Offset is shown as information only, and
+// the verdict comes from the LIM's pass / fail and its reason (v5), never from offset.
+const RATIO_MIN = 0.97;
+const FAIL_WHY = { 1: 'test impedance low (the LIM\'s own words)', 2: 'test impedance high (the LIM\'s own words)', 3: 'Test Res. outside 36-46 K',
+  4: 'L1:L2 ratio (the LIM\'s own words)', 5: 'offset (the LIM\'s own words)', 6: 'the LIM\'s own message', 7: 'the LIM\'s bad-test count went up',
+  8: '"Err.": test current out of range (the LIM stopped sending at the end of its self-test)',
+  9: '"Er.r": LIM memory (ROM) fault (the LIM stopped sending as its self-test began)', 10: 'the LIM stopped sending part way through its self-test' };
 const SD_ERR = { 90: 'line ratio high', 91: 'line ratio low', 92: 'low line', 95: 'L1L3 ratio high', 96: 'L1L3 ratio low', 97: 'frequency out of tolerance' };
 
 // Test record events (the remote's last few hours, seconds ago)
@@ -217,8 +237,10 @@ function findings(d, scan, ev) {
     lim = true;
     const last = d.fails.length ? at(scan, d.fails[0]) : null;
     const why = [];
-    if (d.cal && d.cal.ratioMin < RATIO_MIN) why.push(`L1:L2 ratio down to ${d.cal.ratioMin.toFixed(3)} (healthy about 1.00; fails below ${RATIO_MIN})`);
-    if (d.cal && d.cal.offsetMax > OFFSET_MAX) why.push(`offset up to ${d.cal.offsetMax} mV (fails over ${OFFSET_MAX})`);
+    if (d.failWhy && d.failWhy.length) {           // v5: the reason the LIM / box gave for each failure
+      const c = {}; d.failWhy.forEach(r => { const w = FAIL_WHY[r] || 'reason not recorded'; c[w] = (c[w] || 0) + 1; });
+      Object.entries(c).forEach(([w, k]) => why.push(`${k > 1 ? k + ' x ' : ''}${w}`));
+    } else if (d.cal && d.cal.ratioMin < RATIO_MIN) why.push(`L1:L2 ratio down to ${d.cal.ratioMin.toFixed(3)} (healthy about 1.00)`);
     if (d.cal && d.cal.bad) why.push(`the LIM's own Bad Tests count is ${d.cal.bad}`);
     if (d.lastErr) why.push(`last LIM error #${d.lastErr}${SD_ERR[d.lastErr] ? ' (' + SD_ERR[d.lastErr] + ')' : ''}`);
     out.push(`<b>${d.stFail7} of ${d.selftests7} LIM self-tests failed this week</b>${last ? `, the newest ${day(last)} ${hm(last)}` : ''}${why.length ? ': ' + why.join('; ') : ''}. The LIM is failing its own check. That is what a bench soak looks for: send it in.`);
@@ -242,12 +264,24 @@ function findings(d, scan, ev) {
     out.push(`<b>${plural(d.steps24, 'step')} in 24 h (${d.steps7} this week), none at self-tests.</b> The reading rises, holds for a while, then drops: looks like equipment switching on and off (a battery charger, thermostat or battery check). Check what stays plugged in.`);
   }
   if (d.hasTests && d.health && !(d.health.flash && d.health.supply && d.health.keys) ) out.push(`<b>The remote itself reports a problem</b> (see Remote below). Fix the remote before trusting the log.`);
-  if ((d.hasSwing || d.kind === 2) && !lim) out.push(`LIM self-tests look clean: ${d.hasTests && d.graded ? `${d.stFail7} failed, ` : ''}${d.stJumps7} of ${d.selftests7} with a jump.`);
+  if (d.kind === 1 && d.trendFail7) { lim = true; out.push(`<b>${plural(d.trendFail7, 'LIM self-test')} failed this week:</b> see the LIM health report (TEST on the remote's report screen).`); }
+  if (d.kind === 2 && d.graded) { if (!lim) out.push(`LIM self-tests passed: ${d.stFail7} failed, ${d.stJumps7} of ${d.selftests7} with a THC jump.`); }
+  else if ((d.hasSwing || d.kind === 2) && !(d.stJumps7 >= 3)) out.push(`No THC jump at ${d.selftests7 === 1 ? 'the self-test' : `the ${d.selftests7} self-tests`}${d.stJumps7 ? ` except ${d.stJumps7}` : ''}${d.kind === 1 ? ' (pass / fail is in the LIM health report)' : ''}.`);
+  if (d.missedAuto) { lim = true; out.push(`<b>The LIM skipped its automatic self-test ${plural(d.missedAuto, 'time')}</b> (25 h of readings with no self-test; it should run every 23.3 h), the newest ${day(at(scan, d.missedAgo))} ${hm(at(scan, d.missedAgo))}.`); }
   if (d.kind === 2 && !d.graded) out.push(`This LIM only reports that a self-test ran, not whether it passed. The remote still checks whether the reading jumps at each test.`);
   const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')]
     : d.kind === 2 ? [d.graded ? 'LIM passes its self-tests' : 'Nothing stands out at self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
   $('insight').style.borderLeftColor = head[1];
   return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || `<li>${d.kind === 2 ? 'No failed self-tests and no LIM errors.' : 'No alarms, steps or spikes in 7 days.'}</li>`}</ul>`;
+}
+
+function gapNote(d, scan) {                       // v5: power-offs (unknown length) + imported log
+  if (d.v < 5) return '';
+  let s = '';
+  if (d.gaps && d.gaps.length) s += `<br><b>Powered off ${plural(d.boots - 1, 'time')} since this record started</b> (newest power-up ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count). The remote has no clock, so anything before a power-off happened EARLIER than shown, by the unknown off time.`;
+  s += `<br>Record: ${d.recordH >= 48 ? Math.floor(d.recordH / 24) + ' days' : d.recordH + ' h'} of powered time.`;
+  if (d.imported) s += ' <b>Includes an imported (laptop) log.</b>';
+  return s;
 }
 
 function render(d, scan, sampleKey) {
@@ -299,7 +333,7 @@ function render(d, scan, sampleKey) {
       ...(d.kind === 2 || !d.graded ? [] : [['Self-tests failed', flag(d.stFail7, `${d.stFail7} <small>of ${d.selftests7}</small>`), 'last 7 days']]),
       ...(c ? [
         ['L1:L2 ratio', flag(c.ratioMin < RATIO_MIN, c.ratioMin.toFixed(3)), `lowest this week; last ${c.ratio.toFixed(3)} (healthy ~1.00)`],
-        ['Offset', flag(c.offsetMax > OFFSET_MAX, `${c.offsetMax} <small>mV</small>`), `highest this week; last ${c.offset} mV`],
+        ...(c.offsetMax === null ? [] : [['Offset', `${c.offsetMax} <small>mV</small>`, `highest this week, last ${c.offset === null ? '–' : c.offset + ' mV'} (information: the LIM has no offset limit)`]]),
         ['Bad Tests count', c.bad, "the LIM's own counter"],
       ] : d.kind === 2 ? [] : [['Test detail', '–', 'no cal values from this LIM']]),
       ['Remote', probs.length ? flag(true, 'Check') : 'OK', probs.length ? probs.join(', ') : 'self-check passed'],
@@ -340,7 +374,7 @@ function render(d, scan, sampleKey) {
     $('c30h').textContent = 'Failed self-tests per day, last 30 days';
     if (d.dailyFails) $('c30').innerHTML = bars(d.dailyFails.slice().reverse(), dayLab(30), 1, { aria: 'Failed self-tests per day', tripLabel: 'any = fail', fmt: v => plural(v, 'failed test') });
     $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
-      + '<br>For the THC trend, press SILENCE on the remote\'s report screen.'
+      + gapNote(d, scan) + '<br>For the THC trend, press SILENCE on the remote\'s report screen.'
       + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
     return;
   }
@@ -362,7 +396,7 @@ function render(d, scan, sampleKey) {
       + (d.alarms7 > ev.length ? `<p class="foot">Showing the newest ${ev.length} of ${d.alarms7}.</p>` : '')
     : '<p>None.</p>';
   $('foot').innerHTML = `${esc(d.lim)} · LIM comms ${d.comms ? 'OK' : '<b>LOST</b>'} · ${d.commsErr} comms errors in 7 days · remote powered up ${d.uptimeH >= 65535 ? 'over 7 years' : Math.floor(d.uptimeH / 24) + ' days'} ago`
-    + (d.powerup ? ' · <b>power cut inside the window: older data missing</b>' : '')
+    + (d.powerup && d.v < 5 ? ' · <b>power cut inside the window: older data missing</b>' : '') + gapNote(d, scan)
     + (d.kind === 1 ? '<br>For LIM self-tests and the remote\'s own check, press TEST on the remote\'s report screen.' : '')
     + '<br>Times use the scanning phone\'s clock at the moment of the scan. The readings never leave this device.';
 }
@@ -374,7 +408,7 @@ function show(link, now, sampleKey) {
   try {
     const d = decode(link), scan = d.scanned || now;
     render(d, scan, sampleKey);
-    shareUrl = d.scanned ? link : link.replace(/(#[1-4]\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
+    shareUrl = d.scanned ? link : link.replace(/(#[1-5]\.[A-Za-z0-9_-]+)/, `$1.${Math.floor(scan.getTime() / 1000)}`);
     if (!sampleKey && !d.scanned && link === location.href) history.replaceState(null, '', shareUrl);
     if (d.scanned && !sampleKey) $('banner').innerHTML = `<div class="banner">Scanned ${day(scan)} at ${hm(scan)}.</div>`;
     $('actions').hidden = false;
@@ -389,7 +423,7 @@ $('share').onclick = async () => {
 };
 $('print').onclick = () => window.print();
 $('go').onclick = () => show($('paste').value.trim(), new Date(), null);
-if (/^#[1-4]\./.test(location.hash)) show(location.href, new Date(), null);
+if (/^#[1-5]\./.test(location.hash)) show(location.href, new Date(), null);
 else {
   const want = new URLSearchParams(location.search).get('sample');
   const key = want && SAMPLES[want] ? want : 'room';
