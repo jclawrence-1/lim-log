@@ -170,7 +170,10 @@ function decode(link) {
   // hours in the record, record flags (bit 0 = includes an imported laptop log), then the newest power-ups, minutes ago.
   function readGaps() {
     d.boots = u8(); d.recordH = u16(); const rf = u8(); d.imported = !!(rf & 1);
-    const n = u8(); d.gaps = Array.from({ length: n }, () => u16());
+    // firmware 24g: record flags bit 1 = a restart count follows (power-ups that were restarts with the power ON: firmware
+    // update, watchdog), and bit 15 of each newest power-up's minutes marks such a restart. Older links: no restarts known.
+    d.restarts = rf & 2 ? u8() : null;
+    const n = u8(); d.gaps = Array.from({ length: n }, () => { const g = u16(); return rf & 2 ? g & 0x7FFF : g; });
   }
   function readHealth() {
     const h = u8();
@@ -278,7 +281,10 @@ function findings(d, scan, ev) {
 function gapNote(d, scan) {                       // v5: power-offs (unknown length) + imported log
   if (d.v < 5) return '';
   let s = '';
-  if (d.gaps && d.gaps.length) s += `<br><b>Powered off ${plural(d.boots - 1, 'time')} since this record started</b> (newest power-up ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count). The remote has no clock, so anything before a power-off happened EARLIER than shown, by the unknown off time.`;
+  const offs = d.restarts == null ? d.boots - 1 : Math.max(0, d.boots - 1 - d.restarts);
+  const rsNote = d.restarts ? `, restarted ${plural(d.restarts, 'time')} with the power on (firmware update or reset)` : '';
+  if (d.gaps && d.gaps.length && offs === 0) s += `<br>Never powered off since this record started${rsNote} (newest start ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count).`;
+  else if (d.gaps && d.gaps.length) s += `<br><b>Powered off ${plural(offs, 'time')} since this record started</b>${rsNote} (newest start ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count). The remote has no clock, so anything before a power-off happened EARLIER than shown, by the unknown off time.`;
   s += `<br>Record: ${d.recordH >= 48 ? Math.floor(d.recordH / 24) + ' days' : d.recordH + ' h'} of powered time.`;
   if (d.imported) s += ' <b>Includes an imported (laptop) log.</b>';
   return s;
