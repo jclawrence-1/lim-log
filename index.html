@@ -173,6 +173,9 @@ function decode(link) {
     // firmware 24g: record flags bit 1 = a restart count follows (power-ups that were restarts with the power ON: firmware
     // update, watchdog), and bit 15 of each newest power-up's minutes marks such a restart. Older links: no restarts known.
     d.restarts = rf & 2 ? u8() : null;
+    // firmware 24h: record flags bit 2 = the comms box's OWN self-test fail history (kept through its restarts): fails
+    // in 24 h, failed in a row, fails in 7 d (255 = older box), newest fail minutes ago (65535 = none / older box).
+    if (rf & 4) { const f24 = u8(), row = u8(), f7 = u8(), nw = u16(); d.box = { f24, row, f7: f7 === 255 ? null : f7, newest: nw === 65535 ? null : nw }; }
     const n = u8(); d.gaps = Array.from({ length: n }, () => { const g = u16(); return rf & 2 ? g & 0x7FFF : g; });
   }
   function readHealth() {
@@ -268,15 +271,31 @@ function findings(d, scan, ev) {
   }
   if (d.hasTests && d.health && !(d.health.flash && d.health.supply && d.health.keys) ) out.push(`<b>The remote itself reports a problem</b> (see Remote below). Fix the remote before trusting the log.`);
   if (d.kind === 1 && d.trendFail7) { lim = true; out.push(`<b>${plural(d.trendFail7, 'LIM self-test')} failed this week:</b> see the LIM health report (TEST on the remote's report screen).`); }
-  if (d.kind === 2 && d.graded) { if (!lim) out.push(`LIM self-tests passed: ${d.stFail7} failed, ${d.stJumps7} of ${d.selftests7} with a THC jump.`); }
+  // 24h: the comms box's own fail history (it survives box restarts and is older than a fresh remote record)
+  const bx = d.box, bxFails = bx ? Math.max(bx.f24, bx.f7 || 0) : 0;
+  if (bx && bxFails) {
+    lim = true;
+    out.push(`<b>The comms box saw ${plural(bx.f7 != null ? bx.f7 : bx.f24, 'failed self-test')} in the last ${bx.f7 != null ? '7 days' : '24 h'}</b>`
+      + `${bx.f7 != null && bx.f24 ? ` (${bx.f24} in the last 24 h)` : ''}${bx.row >= 2 ? `, <b>${bx.row} in a row</b>` : ''}`
+      + `${bx.newest != null ? `, the newest about ${ago(bx.newest)} ago` : ''}. The box keeps its own record through power cuts.`);
+  }
+  // 24h (Joe 11-24): never claim more than the record covers. A remote whose record is days old can say "passes";
+  // a 2 h record can only say nothing failed in those 2 h.
+  const recH = d.v >= 5 ? d.recordH : null, shortRec = recH != null && recH < 7 * 24;
+  if (d.kind === 2 && d.graded) { if (!lim) out.push(shortRec
+    ? `No failed self-test in the ${span(recH)} this remote has recorded (${d.selftests7} run, ${d.stJumps7} with a THC jump). Tests before that are not in this record.`
+    : `LIM self-tests passed: ${d.stFail7} failed, ${d.stJumps7} of ${d.selftests7} with a THC jump.`); }
   else if ((d.hasSwing || d.kind === 2) && !(d.stJumps7 >= 3)) out.push(`No THC jump at ${d.selftests7 === 1 ? 'the self-test' : `the ${d.selftests7} self-tests`}${d.stJumps7 ? ` except ${d.stJumps7}` : ''}${d.kind === 1 ? ' (pass / fail is in the LIM health report)' : ''}.`);
   if (d.missedAuto) { lim = true; out.push(`<b>The LIM skipped its automatic self-test ${plural(d.missedAuto, 'time')}</b> (25 h of readings with no self-test; it should run every 23.3 h), the newest ${day(at(scan, d.missedAgo))} ${hm(at(scan, d.missedAgo))}.`); }
   if (d.kind === 2 && !d.graded) out.push(`This LIM only reports that a self-test ran, not whether it passed. The remote still checks whether the reading jumps at each test.`);
   const head = lim ? ['Suspect the LIM', css('--red')] : room ? ['Looks like the room, not the LIM', css('--amber')]
-    : d.kind === 2 ? [d.graded ? 'LIM passes its self-tests' : 'Nothing stands out at self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
+    : d.kind === 2 ? [d.graded ? (shortRec ? `No failed self-test in ${span(recH)} recorded` : 'LIM passes its self-tests') : 'Nothing stands out at self-tests', css('--ok')] : ['Nothing stands out', css('--ok')];
   $('insight').style.borderLeftColor = head[1];
   return `<div class="verdict" style="color:${head[1]}">${head[0]}</div><ul>${out.map(x => `<li>${x}</li>`).join('') || `<li>${d.kind === 2 ? 'No failed self-tests and no LIM errors.' : 'No alarms, steps or spikes in 7 days.'}</li>`}</ul>`;
 }
+
+function span(h) { return h >= 48 ? Math.floor(h / 24) + ' days' : Math.max(1, h) + ' h'; }   // 24h: record length in words
+function ago(min) { return min < 90 ? Math.max(1, min) + ' min' : min < 48 * 60 ? Math.round(min / 60) + ' h' : Math.round(min / 1440) + ' days'; }
 
 function gapNote(d, scan) {                       // v5: power-offs (unknown length) + imported log
   if (d.v < 5) return '';
@@ -298,13 +317,21 @@ function render(d, scan, sampleKey) {
   const card = ([l, v, s]) => `<div class="card stat"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;
   const mA = v => v === null ? '–' : v.toFixed(1) + ' <small>mA</small>';
   const m24 = d.hasTrend ? at(scan, d.max24.ago) : null, m7 = d.hasTrend ? at(scan, d.max7.ago) : null;
-  const lastFail = d.fails.length ? at(scan, d.fails[0]) : null;
+  // 24h: the cards never claim more than the record covers, and take the comms box's own history when it is sent
+  const recH = d.v >= 5 ? d.recordH : null, shortRec = recH != null && recH < 7 * 24;
+  const bx = d.box, bxN = bx ? (bx.f7 != null ? bx.f7 : bx.f24) : 0;
+  const remAgo = d.fails.length ? d.fails[0] : null, bxAgo = bx && bx.newest != null ? bx.newest : null;
+  const lfAgo = remAgo == null ? bxAgo : bxAgo == null ? remAgo : Math.min(remAgo, bxAgo);
+  const lastFail = lfAgo != null ? at(scan, lfAgo) : null;
+  const nFail = Math.max(d.stFail7, bxN);
   $('stats').innerHTML = (d.kind === 2 ? [
     ['THC now', mA(d.now), `<span class="state" style="background:${st[1]}">${st[0]}</span>${d.silenced ? ' silenced' : ''}`],
-    ['Self-tests, 7 days', d.selftests7, 'run by the LIM'],
+    [shortRec ? `Self-tests, ${span(recH)} recorded` : 'Self-tests, 7 days', d.selftests7, 'run by the LIM'],
     ...(d.graded ? [
-      ['Failed', d.stFail7 ? `<span style="color:${css('--red')}">${d.stFail7}</span>` : 0, 'last 7 days'],
-      ['Last failure', lastFail ? `${hm(lastFail)}` : 'none', lastFail ? day(lastFail) : 'in the last 30 days'],
+      ['Failed', nFail ? `<span style="color:${css('--red')}">${nFail}</span>` : 0,
+        bx ? (bx.f7 != null ? 'last 7 days, comms box record' : 'last 24 h, comms box record') : shortRec ? `in ${span(recH)} recorded` : 'last 7 days'],
+      ['Last failure', lastFail ? `${hm(lastFail)}` : 'none', lastFail ? day(lastFail) + (lfAgo === bxAgo && bx ? ' (comms box)' : '')
+        : bx ? 'none kept by the comms box' : recH != null && recH < 720 ? `in ${span(recH)} recorded` : 'in the last 30 days'],
     ] : [
       ['Jumps at self-tests', d.stJumps7, 'last 7 days'],
       ['Pass / fail', '–', 'this LIM only reports that a test ran'],
