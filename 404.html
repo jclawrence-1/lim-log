@@ -176,6 +176,8 @@ function decode(link) {
     // firmware 24h: record flags bit 2 = the comms box's OWN self-test fail history (kept through its restarts): fails
     // in 24 h, failed in a row, fails in 7 d (255 = older box), newest fail minutes ago (65535 = none / older box).
     if (rf & 4) { const f24 = u8(), row = u8(), f7 = u8(), nw = u16(); d.box = { f24, row, f7: f7 === 255 ? null : f7, newest: nw === 65535 ? null : nw }; }
+    // firmware 25j: record flags bit 3 = the LIM's own clock (minute of the day) when the QR was drawn (PG Mark V / SafeDetec)
+    d.limClock = rf & 8 ? u16() : null;
     const n = u8(); d.gaps = Array.from({ length: n }, () => { const g = u16(); return rf & 2 ? g & 0x7FFF : g; });
   }
   function readHealth() {
@@ -261,7 +263,9 @@ function findings(d, scan, ev) {
     const lo = Math.floor(Math.min(...hrs)), hi = Math.ceil(Math.max(...hrs));
     const wk = ev.every(e => e.t.getDay() >= 1 && e.t.getDay() <= 5);
     const short = ev.every(e => e.dur <= 2);
-    if (hi - lo <= 4 && ev.length >= 2) { room = true; out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days, all between ${hr12(lo)} and ${hr12(hi % 24)}${wk ? ', weekdays only' : ''}.</b> A repeating time points to equipment used on a schedule (a case, a cart, a light). Check what is plugged in then.`); }
+    const days = new Set(ev.map(e => e.t.toDateString())).size;   // 25j (Joe 11-26): 2 alarms a minute apart is not a pattern
+    if (ev.length < 3 || days < 2) out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days:</b> too few, or all on one day, to show a pattern yet.`);
+    else if (hi - lo <= 4) { room = true; out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days, all between ${hr12(lo)} and ${hr12(hi % 24)}${wk ? ', weekdays only' : ''}.</b> A repeating time points to equipment used on a schedule (a case, a cart, a light). Check what is plugged in then.`); }
     else if (short) { lim = true; out.push(`<b>${plural(d.alarms7, 'alarm')}, each lasting a minute or two, at scattered times.</b> Short alarms with no pattern are typical of a LIM glitch rather than a load.`); }
     else out.push(`<b>${plural(d.alarms7, 'alarm')} in 7 days,</b> no single time of day stands out.`);
   }
@@ -297,15 +301,25 @@ function findings(d, scan, ev) {
 function span(h) { return h >= 48 ? Math.floor(h / 24) + ' days' : Math.max(1, h) + ' h'; }   // 24h: record length in words
 function ago(min) { return min < 90 ? Math.max(1, min) + ' min' : min < 48 * 60 ? Math.round(min / 60) + ' h' : Math.round(min / 1440) + ' days'; }
 
+function limClockNote(d, scan) {                  // 25j: the LIM's own clock vs the phone's (PG Mark V / SafeDetec)
+  const lm = d.limClock, pm = scan.getHours() * 60 + scan.getMinutes();
+  let off = lm - pm; if (off > 720) off -= 1440; if (off < -720) off += 1440;
+  const clk = `${Math.floor(lm / 60)}:${String(lm % 60).padStart(2, '0')}`;
+  if (Math.abs(off) <= 3) return `<br>LIM clock: ${clk}, matches this phone.`;
+  const dst = Math.abs(Math.abs(off) - 60) <= 10 ? ' Looks like the daylight-saving change was never made: this LIM does not change it by itself.' : '';
+  return `<br><b>LIM clock: ${clk}, ${ago(Math.abs(off))} ${off > 0 ? 'fast' : 'slow'}</b> against this phone.${dst} Set it at the LIM (Cfgr: Current Hour / Minute).`;
+}
+
 function gapNote(d, scan) {                       // v5: power-offs (unknown length) + imported log
   if (d.v < 5) return '';
   let s = '';
   const offs = d.restarts == null ? d.boots - 1 : Math.max(0, d.boots - 1 - d.restarts);
   const rsNote = d.restarts ? `, restarted ${plural(d.restarts, 'time')} with the power on (firmware update or reset)` : '';
   if (d.gaps && d.gaps.length && offs === 0) s += `<br>Never powered off since this record started${rsNote} (newest start ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count).`;
-  else if (d.gaps && d.gaps.length) s += `<br><b>Powered off ${plural(offs, 'time')} since this record started</b>${rsNote} (newest start ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count). The remote has no clock, so anything before a power-off happened EARLIER than shown, by the unknown off time.`;
+  else if (d.gaps && d.gaps.length) s += `<br><b>Powered off ${plural(offs, 'time')} since this record started</b>${rsNote} (newest start ${day(at(scan, d.gaps[0]))} ${hm(at(scan, d.gaps[0]))} by the remote's count).${d.limClock != null ? ' The remote counts its own powered time; the LIM sends only its time of day (no date), so' : ' The remote has no clock, so'} anything before a power-off happened EARLIER than shown, by the unknown off time.`;
   s += `<br>Record: ${d.recordH >= 48 ? Math.floor(d.recordH / 24) + ' days' : d.recordH + ' h'} of powered time.`;
   if (d.imported) s += ' <b>Includes an imported (laptop) log.</b>';
+  if (d.limClock != null) s += limClockNote(d, scan);   // 25j
   return s;
 }
 
